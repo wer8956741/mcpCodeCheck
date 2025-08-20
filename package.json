@@ -1,0 +1,60 @@
+{
+  "name": "lint-mcp",
+  "version": "1.0.0",
+  "description": "Intelligent Go code linting MCP server with smart change detection and multi-project support",
+  "main": "index.js",
+  "bin": {
+    "lint-mcp": "./index.js"
+  },
+  "scripts": {
+    "build": "go build -o bin/lint-mcp main.go",
+    "prepublishOnly": "npm run build",
+    "postinstall": "echo 'lint-mcp installed successfully! Use: npx lint-mcp'",
+    "publish-package": "./scripts/publish.sh",
+    "update": "./scripts/update.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "golang",
+    "linting",
+    "golangci-lint",
+    "code-quality",
+    "static-analysis",
+    "model-context-protocol",
+    "cursor",
+    "ai-tools"
+  ],
+  "author": "lint-mcp contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/lint-mcp.git"
+  },
+  "homepage": "https://github.com/yourusername/lint-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/yourusername/lint-mcp/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE",
+    "index.js",
+    "package.json"
+  ],
+  "preferGlobal": true,
+  "dependencies": {},
+  "devDependencies": {}
+}

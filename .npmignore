@@ -1,0 +1,38 @@
+# Source files
+*.go
+go.mod
+go.sum
+vendor/
+
+# Development files
+test_*.go
+debug_*.go
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts (except the final binary)
+*.o
+*.a
+*.so
+
+# Keep only the compiled binary in bin/
+bin/*
+!bin/lint-mcp
