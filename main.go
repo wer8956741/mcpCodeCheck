@@ -313,29 +313,26 @@ func detectBaseCommit(projectRoot string) (string, string, error) {
 
 	// 策略2: 检测与主分支的分叉点
 	log.Printf("策略2: 尝试检测与主分支的分叉点...")
-	mainBranches := getSmartMainBranches(projectRoot)
-	for _, mainBranch := range mainBranches {
-		cmd := exec.Command("git", "rev-parse", "--verify", mainBranch)
-		cmd.Dir = projectRoot
-		if err := cmd.Run(); err != nil {
-			continue
-		}
+	mainBranch := getActualMainBranch(projectRoot)
+	if mainBranch != "" {
 		cmd = exec.Command("git", "merge-base", "HEAD", mainBranch)
 		cmd.Dir = projectRoot
 		output, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-		mergeBase := strings.TrimSpace(string(output))
-		cmd = exec.Command("git", "rev-list", "--count", mergeBase+"..HEAD")
-		cmd.Dir = projectRoot
-		countOutput, err := cmd.Output()
 		if err == nil {
-			count := strings.TrimSpace(string(countOutput))
-			if count != "0" {
-				return mergeBase, fmt.Sprintf("分支分叉点(%s个提交)", count), nil
+			mergeBase := strings.TrimSpace(string(output))
+			cmd = exec.Command("git", "rev-list", "--count", mergeBase+"..HEAD")
+			cmd.Dir = projectRoot
+			countOutput, err := cmd.Output()
+			if err == nil {
+				count := strings.TrimSpace(string(countOutput))
+				if count != "0" {
+					log.Printf("✅ 找到与%s的分叉点: %s (%s个提交)", mainBranch, mergeBase, count)
+					return mergeBase, fmt.Sprintf("分支分叉点(vs %s, %s个提交)", mainBranch, count), nil
+				}
 			}
 		}
+	} else {
+		log.Printf("⚠️ 未找到有效主分支，跳过策略2")
 	}
 
 	// 策略3: 工作区变更
@@ -925,9 +922,9 @@ func handleCodeLintRequest(ctx context.Context, req *protocol.CallToolRequest) (
 	return &protocol.CallToolResult{Content: []protocol.Content{&protocol.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
 }
 
-// getSmartMainBranches 智能获取主分支候选
-func getSmartMainBranches(projectRoot string) []string {
-	log.Printf("🔍 智能检测主分支候选...")
+// getActualMainBranch 获取项目实际使用的主分支
+func getActualMainBranch(projectRoot string) string {
+	log.Printf("🔍 智能检测实际主分支...")
 
 	// 方法1: 检查Git默认分支配置 (最准确)
 	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
@@ -937,10 +934,16 @@ func getSmartMainBranches(projectRoot string) []string {
 		if parts := strings.Split(defaultRef, "/"); len(parts) >= 3 {
 			branchName := strings.Join(parts[3:], "/")
 			remoteBranch := "origin/" + branchName
-			localBranch := branchName
-			log.Printf("✅ 智能检测到默认分支: %s", remoteBranch)
-			// 将检测到的分支放在前面，优先检查
-			return []string{remoteBranch, localBranch, "origin/main", "main", "origin/master", "master", "origin/develop", "develop"}
+			// 验证该分支是否真实存在
+			if verifyBranchExists(projectRoot, remoteBranch) {
+				log.Printf("✅ 检测到Git默认分支: %s", remoteBranch)
+				return remoteBranch
+			}
+			// 尝试本地分支
+			if verifyBranchExists(projectRoot, branchName) {
+				log.Printf("✅ 检测到Git默认分支(本地): %s", branchName)
+				return branchName
+			}
 		}
 	}
 
@@ -959,9 +962,17 @@ func getSmartMainBranches(projectRoot string) []string {
 						if toIdx := strings.Index(remaining, " to "); toIdx >= 0 {
 							sourceBranch := remaining[:toIdx]
 							if sourceBranch != currentBranch && sourceBranch != "" {
-								log.Printf("✅ 从reflog发现源分支: %s", sourceBranch)
-								// 将发现的源分支放在前面，优先检查
-								return []string{"origin/" + sourceBranch, sourceBranch, "origin/main", "main", "origin/master", "master"}
+								// 优先检查origin/分支
+								remoteBranch := "origin/" + sourceBranch
+								if verifyBranchExists(projectRoot, remoteBranch) {
+									log.Printf("✅ 从reflog发现源分支: %s", remoteBranch)
+									return remoteBranch
+								}
+								// 检查本地分支
+								if verifyBranchExists(projectRoot, sourceBranch) {
+									log.Printf("✅ 从reflog发现源分支(本地): %s", sourceBranch)
+									return sourceBranch
+								}
 							}
 						}
 					}
@@ -970,9 +981,24 @@ func getSmartMainBranches(projectRoot string) []string {
 		}
 	}
 
-	// 备用: 常见主分支候选
-	log.Printf("⚠️ 使用备用主分支候选")
-	return []string{"origin/main", "main", "origin/master", "master", "origin/develop", "develop", "origin/release", "release"}
+	// 方法3: 按优先级检查常见主分支
+	candidates := []string{"origin/main", "main", "origin/master", "master", "origin/develop", "develop"}
+	for _, branch := range candidates {
+		if verifyBranchExists(projectRoot, branch) {
+			log.Printf("✅ 找到存在的主分支: %s", branch)
+			return branch
+		}
+	}
+
+	log.Printf("⚠️ 未能找到有效的主分支")
+	return ""
+}
+
+// verifyBranchExists 验证分支是否存在
+func verifyBranchExists(projectRoot, branch string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", branch)
+	cmd.Dir = projectRoot
+	return cmd.Run() == nil
 }
 
 // getCurrentBranchSmart 获取当前分支名
