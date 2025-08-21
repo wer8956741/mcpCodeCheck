@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -11,20 +10,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/ThinkInAIXYZ/go-mcp/server"
-	"github.com/ThinkInAIXYZ/go-mcp/transport"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // buildErrorResult 统一将错误以 JSON Issues 形式返回，避免上层只显示 "Error:"
-func buildErrorResult(message string) *protocol.CallToolResult {
+func buildErrorResult(message string) *mcp.CallToolResult {
 	lr := &LintResult{Issues: []Issue{{
 		FromLinter: "lint-mcp",
 		Text:       message,
 		Pos:        Pos{Filename: "system", Line: 0, Column: 0},
 	}}}
 	b, _ := json.Marshal(lr)
-	return &protocol.CallToolResult{Content: []protocol.Content{&protocol.TextContent{Type: "text", Text: string(b)}}}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(b)}}}
 }
 
 // CodeLintRequest 定义智能代码检查请求结构
@@ -732,7 +730,7 @@ func extractJSONFromOutput(output string) string {
 }
 
 // handleCodeLintRequest 处理智能代码检查请求
-func handleCodeLintRequest(ctx context.Context, req *protocol.CallToolRequest) (result *protocol.CallToolResult, err error) {
+func handleCodeLintRequest(ctx context.Context, req mcp.CallToolRequest) (result *mcp.CallToolResult, err error) {
 	// 捕获任何 panic 并转换为错误返回
 	defer func() {
 		if r := recover(); r != nil {
@@ -742,25 +740,27 @@ func handleCodeLintRequest(ctx context.Context, req *protocol.CallToolRequest) (
 		}
 	}()
 
-	log.Printf("收到智能代码检查请求: %s", string(req.RawArguments))
+	log.Printf("收到智能代码检查请求: name=%s args=%v", req.Params.Name, req.Params.Arguments)
 
 	var lintReq CodeLintRequest
-	if err := protocol.VerifyAndUnmarshal(req.RawArguments, &lintReq); err != nil {
+	// 将 arguments 映射解码到结构体
+	if req.Params.Arguments == nil {
+		req.Params.Arguments = map[string]interface{}{}
+	}
+	argsBytes, _ := json.Marshal(req.Params.Arguments)
+	if err := json.Unmarshal(argsBytes, &lintReq); err != nil {
 		return buildErrorResult(fmt.Sprintf("无效的请求参数: %v", err)), nil
 	}
 
 	log.Printf("解析后的请求: %+v", lintReq)
 
 	// 设置默认值：如果没有明确指定，则设置默认值
-	if req.RawArguments == nil {
+	if req.Params.Arguments == nil {
 		lintReq.CheckOnlyChanges = true
 	} else {
-		// 检查原始参数中是否包含字段，设置默认值
-		var rawCheck map[string]interface{}
-		if err := json.Unmarshal(req.RawArguments, &rawCheck); err == nil {
-			if _, exists := rawCheck["checkOnlyChanges"]; !exists {
-				lintReq.CheckOnlyChanges = true
-			}
+		// 原始参数中是否包含字段，设置默认值
+		if _, exists := req.Params.Arguments["checkOnlyChanges"]; !exists {
+			lintReq.CheckOnlyChanges = true
 		}
 	}
 
@@ -897,7 +897,7 @@ func handleCodeLintRequest(ctx context.Context, req *protocol.CallToolRequest) (
 
 		finalResult := &LintResult{Issues: allIssues}
 		resultJSON, _ := json.Marshal(finalResult)
-		return &protocol.CallToolResult{Content: []protocol.Content{&protocol.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
 	}
 
 	// checkOnlyChanges=false 时，使用包路径进行全面检查
@@ -919,7 +919,7 @@ func handleCodeLintRequest(ctx context.Context, req *protocol.CallToolRequest) (
 	}
 	finalResult := &LintResult{Issues: allIssues}
 	resultJSON, _ := json.Marshal(finalResult)
-	return &protocol.CallToolResult{Content: []protocol.Content{&protocol.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
 }
 
 // getActualMainBranch 获取项目实际使用的主分支
@@ -1012,47 +1012,30 @@ func getCurrentBranchSmart(projectRoot string) string {
 }
 
 func main() {
-	flag.Parse()
+	log.Println("启动 lint-mcp 服务 (兼容版本)...")
 
-	log.Printf("启动代码检查MCP服务...")
-
-	// 创建 StdioServer 传输服务器
-	transportServer := transport.NewStdioServerTransport()
-
-	// 初始化 MCP 服务器
-	mcpServer, err := server.NewServer(transportServer,
-		server.WithCapabilities(protocol.ServerCapabilities{
-			Tools: &protocol.ToolsCapability{
-				ListChanged: true,
-			},
-		}),
-		server.WithServerInfo(protocol.Implementation{
-			Name:    "lint-mcp",
-			Version: "1.0.0",
-		}),
-		server.WithInstructions("这是一个智能代码检查工具，专注于精确的包级代码检查。支持智能变更检测、多项目处理，避免跨文件引用误报。"),
+	s := server.NewMCPServer(
+		"lint-mcp",
+		"1.0.16",
 	)
-	if err != nil {
-		log.Fatalf("创建 MCP 服务器失败: %v", err)
-	}
 
-	// 注册智能代码检查工具
-	lintTool, err := protocol.NewTool(
-		"code_lint",
-		"智能Go代码检查工具。强烈建议提供 projectPath（项目根目录绝对路径）或 files（任一项目内文件绝对路径）以确定检测起点；支持自动变更检测、精确包级检查和多项目处理。",
-		CodeLintRequest{},
+	// 注册 code_lint 工具
+	tool := mcp.NewTool("code_lint",
+		mcp.WithDescription("智能Go代码检查工具。支持自动变更检测、精确包级检查和多项目处理。"),
+		mcp.WithString("projectPath",
+			mcp.Description("项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"),
+		),
+		mcp.WithBoolean("checkOnlyChanges",
+			mcp.Description("是否启用智能变更检测（默认true）。将自动检测Git变更范围：未推送提交、分支分叉点或工作区变更。"),
+		),
 	)
-	if err != nil {
-		log.Fatalf("创建代码检查工具失败: %v", err)
-	}
 
-	// 注册工具处理器
-	mcpServer.RegisterTool(lintTool, handleCodeLintRequest)
+	s.AddTool(tool, handleCodeLintRequest)
 
-	log.Printf("智能代码检查工具注册成功: %s", lintTool.Name)
+	log.Println("工具注册成功: code_lint")
+	log.Println("服务就绪，等待连接...")
 
-	// 启动服务器
-	if err = mcpServer.Run(); err != nil {
-		log.Fatalf("服务器运行失败: %v", err)
+	if err := server.ServeStdio(s); err != nil {
+		log.Printf("服务错误: %v\n", err)
 	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "lint-mcp",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Intelligent Go code linting MCP server with smart change detection and multi-project support",
   "main": "index.js",
   "bin": {
