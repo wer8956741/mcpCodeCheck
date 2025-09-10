@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lint-mcp-debug": {
+      "command": "/Users/gds/goS/src/MyGo/mcpCodeCheck/bin/lint-mcp-debug",
+      "args": [],
+      "env": {
+        "DEBUG": "1"
+      }
+    }
+  }
+}
+

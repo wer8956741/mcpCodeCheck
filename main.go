@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -27,9 +28,8 @@ func buildErrorResult(message string) *mcp.CallToolResult {
 
 // CodeLintRequest 定义智能代码检查请求结构
 type CodeLintRequest struct {
-	Files            []string `json:"files" description:"参考文件列表（可选，用于确定检查起点）。当checkOnlyChanges=true时，将智能检测当前工作目录的所有变更文件。" required:"false"`
-	ProjectPath      string   `json:"projectPath" description:"项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"`
-	CheckOnlyChanges bool     `json:"checkOnlyChanges" description:"是否启用智能变更检测（默认true）。将自动检测Git变更范围：未推送提交、分支分叉点或工作区变更。" default:"true"`
+	Files       []string `json:"files" description:"参考文件列表（可选，用于确定检查起点）。工具将自动智能检测当前工作目录的所有变更文件。" required:"false"`
+	ProjectPath string   `json:"projectPath" description:"项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"`
 }
 
 // GolangciLintOutput golangci-lint 的实际输出格式
@@ -190,13 +190,111 @@ func getPackagesFromFiles(files []string) (map[string][]string, error) {
 	return result, nil
 }
 
-// checkGolangciLintInstalled 检查golangci-lint是否已安装
-func checkGolangciLintInstalled() error {
-	_, err := exec.LookPath("golangci-lint")
-	if err != nil {
-		return fmt.Errorf("golangci-lint 未安装或不在PATH中")
+// getGolangciLintPath 获取可用的golangci-lint路径
+func getGolangciLintPath() (string, error) {
+	// 优先尝试GOPATH/bin中的版本（通常是go install安装的）
+	if gopath := os.Getenv("GOPATH"); gopath != "" {
+		gopathBin := filepath.Join(gopath, "bin", "golangci-lint")
+		if _, err := os.Stat(gopathBin); err == nil {
+			return gopathBin, nil
+		}
 	}
+
+	// 尝试go env GOPATH
+	cmd := exec.Command("go", "env", "GOPATH")
+	if output, err := cmd.Output(); err == nil {
+		gopath := strings.TrimSpace(string(output))
+		if gopath != "" {
+			gopathBin := filepath.Join(gopath, "bin", "golangci-lint")
+			if _, err := os.Stat(gopathBin); err == nil {
+				return gopathBin, nil
+			}
+		}
+	}
+
+	// 最后尝试PATH中的版本
+	if path, err := exec.LookPath("golangci-lint"); err == nil {
+		return path, nil
+	}
+
+	return "", fmt.Errorf("golangci-lint 未找到")
+}
+
+// checkGolangciLintVersion 检查golangci-lint版本是否符合要求
+func checkGolangciLintVersion(golangciLintPath string) error {
+	cmd := exec.Command(golangciLintPath, "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("无法获取golangci-lint版本: %v", err)
+	}
+
+	versionOutput := string(output)
+	log.Printf("检测到golangci-lint版本: %s", strings.TrimSpace(versionOutput))
+
+	// 检查版本兼容性
+	cmd = exec.Command(golangciLintPath, "run", "--help")
+	helpOutput, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("无法获取golangci-lint run帮助信息: %v", err)
+	}
+
+	helpStr := string(helpOutput)
+
+	// 检查是否支持JSON输出（v2.4.0+支持--output.json.path）
+	supportsOutputJson := strings.Contains(helpStr, "--output.json.path")
+
+	if !supportsOutputJson {
+		return fmt.Errorf(`golangci-lint 版本不兼容
+
+当前版本: %s
+要求版本: v2.4.0 或更高版本
+
+请升级到兼容版本：
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0
+
+升级后请重启MCP服务。`, strings.TrimSpace(versionOutput))
+	}
+
 	return nil
+}
+
+// getGolangciLintOutputArgs 根据版本获取JSON输出参数
+func getGolangciLintOutputArgs() ([]string, error) {
+	golangciLintPath, err := getGolangciLintPath()
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(golangciLintPath, "run", "--help")
+	helpOutput, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("无法获取golangci-lint run帮助信息: %v", err)
+	}
+
+	helpStr := string(helpOutput)
+
+	// v2.4.0+支持--output.json.path（优先检查新版本）
+	if strings.Contains(helpStr, "--output.json.path") {
+		return []string{"--output.json.path", "stdout"}, nil
+	}
+
+	// v1.52.2+支持--out-format（向后兼容）
+	if strings.Contains(helpStr, "--out-format") {
+		return []string{"--out-format", "json", "--print-issued-lines=false", "--print-linter-name=true"}, nil
+	}
+
+	return nil, fmt.Errorf("不支持的golangci-lint版本")
+}
+
+// checkGolangciLintInstalled 检查golangci-lint是否已安装并且版本兼容
+func checkGolangciLintInstalled() error {
+	golangciLintPath, err := getGolangciLintPath()
+	if err != nil {
+		return err
+	}
+
+	// 检查版本兼容性
+	return checkGolangciLintVersion(golangciLintPath)
 }
 
 // autoDetectVendorMode 自动检测项目的依赖模式
@@ -354,7 +452,7 @@ func detectBaseCommit(projectRoot string) (string, string, error) {
 }
 
 // getChangedGoFiles 获取变更的 Go 文件列表（工作区 + 提交范围并集）
-func getChangedGoFiles(projectRoot string) ([]string, error) {
+func getChangedGoFiles(projectRoot string) ([]string, string, string, error) {
 	// 尝试检测基准提交点（用于提交范围）
 	baseCommit, strategy, _ := detectBaseCommit(projectRoot)
 	log.Printf("使用检测策略: %s，基准提交: %s", strategy, baseCommit)
@@ -412,197 +510,84 @@ func getChangedGoFiles(projectRoot string) ([]string, error) {
 		log.Printf("收集到变更 Go 文件: %s", p)
 	}
 	if len(changedGoFiles) == 0 {
-		return nil, fmt.Errorf("未找到任何变更的 Go 文件（工作区与提交范围均为空）")
+		return nil, "", "", fmt.Errorf("未找到任何变更的 Go 文件（工作区与提交范围均为空）")
 	}
 	log.Printf("总共找到 %d 个变更的 Go 文件（工作区+提交范围）", len(changedGoFiles))
-	return changedGoFiles, nil
+	return changedGoFiles, baseCommit, strategy, nil
 }
 
-// runGolangciLint 执行 golangci-lint 检查
-func runGolangciLint(projectRoot string, targets []string, targetType string, checkOnlyChanges bool, vendorMode bool) (*LintResult, error) {
-	log.Printf("开始代码检查，项目根目录: %s，检测目标: %v，类型: %s，vendor模式: %v", projectRoot, targets, targetType, vendorMode)
+// runGolangciLintForChangedPackages 对包含变更文件的包进行智能检查
+func runGolangciLintForChangedPackages(projectRoot string, changedFiles []string, baseCommit string, vendorMode bool) (*LintResult, error) {
+	log.Printf("开始包级智能检查，项目根目录: %s，基准提交: %s，变更文件数: %d", projectRoot, baseCommit, len(changedFiles))
 
-	// 检查golangci-lint是否已安装
-	if err := checkGolangciLintInstalled(); err != nil {
-		log.Printf("golangci-lint 检查失败: %v", err)
-		return &LintResult{
-			Issues: []Issue{
-				{
-					FromLinter: "lint-mcp",
-					Text: `golangci-lint 未安装。请先安装 golangci-lint v1.52.2：
-
-方法1 - 使用 Go install：
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
-
-方法2 - 使用包管理器：
-# macOS (Homebrew)
-brew install golangci-lint
-brew pin golangci-lint && brew install golangci-lint@1.52.2
-
-方法3 - 使用安装脚本：
-curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.52.2
-
-安装完成后请确保 golangci-lint 在 PATH 环境变量中。`,
-					Pos: Pos{
-						Filename: "system",
-						Line:     0,
-						Column:   0,
-					},
-				},
-			},
-		}, nil
+	// 按包分组变更文件
+	packageDirs := make(map[string]bool)
+	for _, file := range changedFiles {
+		packageDir := filepath.Dir(file)
+		packageDirs[packageDir] = true
 	}
 
-	// 检查是否是Go项目
-	goModPath := filepath.Join(projectRoot, "go.mod")
-	if _, err := os.Stat(goModPath); err == nil {
-		if vendorMode {
-			log.Printf("检测到Go项目，使用vendor模式进行检查")
+	log.Printf("发现 %d 个包含变更的包", len(packageDirs))
+
+	allIssues := make([]Issue, 0)
+
+	// 对每个包进行检查
+	for packageDir := range packageDirs {
+		relPackageDir, err := filepath.Rel(projectRoot, packageDir)
+		if err != nil {
+			log.Printf("警告：无法计算包路径 %s 相对于项目根目录 %s 的路径：%v", packageDir, projectRoot, err)
+			continue
+		}
+
+		if relPackageDir == "" || relPackageDir == "." {
+			relPackageDir = "."
 		} else {
-			log.Printf("检测到Go项目，使用标准模式进行检查")
-		}
-	} else {
-		log.Printf("未检测到go.mod文件，将尝试对Go文件进行检查")
-	}
-
-	// 构建命令参数
-	args := []string{"run"}
-
-	// 如果是vendor模式，添加对应的参数（需要在其他参数之前）
-	if vendorMode {
-		args = append(args, "--modules-download-mode=vendor")
-		log.Printf("启用vendor模式，使用 --modules-download-mode=vendor 参数")
-	}
-
-	// 添加输出格式参数
-	args = append(args, "--out-format", "json", "--print-issued-lines=false", "--print-linter-name=true")
-
-	// 如果只检查变更，添加 --new-from-rev 参数
-	if checkOnlyChanges {
-		args = append(args, "--new-from-rev", "HEAD~1")
-		log.Printf("启用变更检测模式，只检查相对于 HEAD~1 的变更")
-	} else {
-		log.Printf("全量检查模式，检查所有代码")
-	}
-
-	// 添加检测目标
-	args = append(args, targets...)
-
-	log.Printf("执行命令: golangci-lint %v", args)
-	log.Printf("命令执行目录: %s", projectRoot)
-
-	// 创建命令
-	cmd := exec.Command("golangci-lint", args...)
-	cmd.Dir = projectRoot // 设置工作目录为项目根目录
-
-	// 设置环境变量
-	cmd.Env = os.Environ()
-
-	// 执行命令
-	output, cmdErr := cmd.CombinedOutput()
-
-	log.Printf("命令输出长度: %d", len(output))
-	log.Printf("命令执行错误: %v", cmdErr)
-
-	// 处理命令执行错误
-	if cmdErr != nil {
-		// 检查是否是"command not found"错误（备用检查）
-		if strings.Contains(cmdErr.Error(), "executable file not found") ||
-			strings.Contains(cmdErr.Error(), "command not found") {
-			return &LintResult{
-				Issues: []Issue{
-					{
-						FromLinter: "lint-mcp",
-						Text:       "golangci-lint 命令未找到。请确保已正确安装 golangci-lint 并且在 PATH 环境变量中。",
-						Pos: Pos{
-							Filename: "system",
-							Line:     0,
-							Column:   0,
-						},
-					},
-				},
-			}, nil
+			// 确保使用正斜杠（Go模块路径格式）
+			relPackageDir = strings.ReplaceAll(relPackageDir, "\\", "/")
+			// 如果路径不以./开头，添加它
+			if !strings.HasPrefix(relPackageDir, "./") {
+				relPackageDir = "./" + relPackageDir
+			}
 		}
 
-		// 其他执行错误，但仍尝试解析输出（golangci-lint可能因为检测到问题而返回非零退出码）
-		log.Printf("golangci-lint 执行返回非零退出码，但这可能是正常的（检测到代码问题）")
-	}
+		log.Printf("检查包: %s (目录: %s)", relPackageDir, packageDir)
 
-	// golangci-lint 当发现问题时会返回非零退出码，但输出仍然有效
-	if len(output) == 0 {
-		if cmdErr != nil {
-			// 如果没有输出且有错误，返回错误信息
-			return &LintResult{
-				Issues: []Issue{
-					{
-						FromLinter: "golangci-lint",
-						Text:       fmt.Sprintf("golangci-lint 执行失败: %v", cmdErr),
-						Pos: Pos{
-							Filename: "unknown",
-							Line:     0,
-							Column:   0,
-						},
-					},
-				},
-			}, nil
+		args := []string{"run"}
+		if vendorMode {
+			args = append(args, "--modules-download-mode=vendor")
 		}
-		log.Printf("golangci-lint 没有输出，代码检查通过")
-		return &LintResult{Issues: []Issue{}}, nil
-	}
 
-	// 从输出中提取JSON部分（去除日志信息）
-	jsonOutput := extractJSONFromOutput(string(output))
-	if jsonOutput == "" {
-		log.Printf("未找到有效的JSON输出")
-		maxLen := 200
-		if len(output) < maxLen {
-			maxLen = len(output)
+		// 关键：添加智能检测的基准提交
+		if baseCommit != "" {
+			args = append(args, "--new-from-rev", baseCommit)
+			log.Printf("使用基准提交进行变更检测: %s", baseCommit)
 		}
-		return &LintResult{
-			Issues: []Issue{
-				{
-					FromLinter: "golangci-lint",
-					Text:       fmt.Sprintf("无法从golangci-lint输出中提取JSON格式数据\n原始输出前200字符: %s", string(output[:maxLen])),
-					Pos: Pos{
-						Filename: "unknown",
-						Line:     0,
-						Column:   0,
-					},
-				},
-			},
-		}, nil
-	}
 
-	log.Printf("提取的JSON输出: %s", jsonOutput)
-
-	// 尝试解析输出
-	var golangciOutput GolangciLintOutput
-	if err := json.Unmarshal([]byte(jsonOutput), &golangciOutput); err != nil {
-		log.Printf("JSON 解析失败: %v", err)
-		maxLen := 50
-		if len(jsonOutput) < maxLen {
-			maxLen = len(jsonOutput)
+		// 根据版本获取JSON输出参数
+		outputArgs, err := getGolangciLintOutputArgs()
+		if err != nil {
+			log.Printf("包 %s 获取输出参数失败: %v", relPackageDir, err)
+			continue
 		}
-		log.Printf("提取的JSON前50字符: %s", jsonOutput[:maxLen])
+		args = append(args, outputArgs...)
+		args = append(args, relPackageDir)
 
-		return &LintResult{
-			Issues: []Issue{
-				{
-					FromLinter: "golangci-lint",
-					Text:       fmt.Sprintf("JSON解析失败: %v\n请检查golangci-lint输出格式", err),
-					Pos: Pos{
-						Filename: "unknown",
-						Line:     0,
-						Column:   0,
-					},
-				},
-			},
-		}, nil
+		result, err := runGolangciLintWithArgs(projectRoot, args)
+		if err != nil {
+			log.Printf("包 %s 检查失败: %v", relPackageDir, err)
+			continue
+		}
+
+		if result != nil && len(result.Issues) > 0 {
+			log.Printf("包 %s 发现 %d 个问题", relPackageDir, len(result.Issues))
+			allIssues = append(allIssues, result.Issues...)
+		} else {
+			log.Printf("包 %s 检查通过，无问题", relPackageDir)
+		}
 	}
 
-	log.Printf("解析到 %d 个问题", len(golangciOutput.Issues))
-
-	return &LintResult{Issues: golangciOutput.Issues}, nil
+	log.Printf("包级检查完成，总共发现 %d 个问题", len(allIssues))
+	return &LintResult{Issues: allIssues}, nil
 }
 
 // runGolangciLintWithArgs 以自定义参数运行 golangci-lint 并解析 JSON 结果
@@ -612,7 +597,12 @@ func runGolangciLintWithArgs(projectRoot string, args []string) (*LintResult, er
 
 	// golangci-lint 可用性检查已在服务启动时完成
 
-	cmd := exec.Command("golangci-lint", args...)
+	golangciLintPath, err := getGolangciLintPath()
+	if err != nil {
+		log.Printf("golangci-lint 未找到: %v", err)
+		return nil, fmt.Errorf("golangci-lint 未找到: %v", err)
+	}
+	cmd := exec.Command(golangciLintPath, args...)
 	cmd.Dir = projectRoot
 	cmd.Env = os.Environ()
 
@@ -734,13 +724,14 @@ func handleCodeLintRequest(ctx context.Context, req mcp.CallToolRequest) (result
 	// 捕获任何 panic 并转换为错误返回
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("发生 panic: %v", r)
+			log.Printf("❌ 发生 panic: %v", r)
 			result = buildErrorResult(fmt.Sprintf("内部错误: %v", r))
 			err = nil // MCP 框架期望错误在结果中，而不是返回错误
 		}
 	}()
 
-	log.Printf("收到智能代码检查请求: name=%s args=%v", req.Params.Name, req.Params.Arguments)
+	log.Printf("🚀 收到智能代码检查请求: name=%s", req.Params.Name)
+	log.Printf("📋 请求参数: %+v", req.Params.Arguments)
 
 	var lintReq CodeLintRequest
 	// 将 arguments 映射解码到结构体
@@ -753,16 +744,6 @@ func handleCodeLintRequest(ctx context.Context, req mcp.CallToolRequest) (result
 	}
 
 	log.Printf("解析后的请求: %+v", lintReq)
-
-	// 设置默认值：如果没有明确指定，则设置默认值
-	if req.Params.Arguments == nil {
-		lintReq.CheckOnlyChanges = true
-	} else {
-		// 原始参数中是否包含字段，设置默认值
-		if _, exists := req.Params.Arguments["checkOnlyChanges"]; !exists {
-			lintReq.CheckOnlyChanges = true
-		}
-	}
 
 	// 如果既没有 projectPath 也没有 files，则直接给出明确指引，避免从可执行目录误扫系统盘
 	if strings.TrimSpace(lintReq.ProjectPath) == "" && (len(lintReq.Files) == 0 || strings.TrimSpace(lintReq.Files[0]) == "") {
@@ -803,120 +784,54 @@ func handleCodeLintRequest(ctx context.Context, req mcp.CallToolRequest) (result
 	}
 	log.Printf("检测起点目录: %s", baseDir)
 
-	// 如果 checkOnlyChanges=true，智能检测变更文件
-	if lintReq.CheckOnlyChanges {
-		log.Printf("checkOnlyChanges=true，智能检测变更文件（起点: %s）", baseDir)
+	// 开始智能变更检测和包级检查
+	log.Printf("开始智能检测变更文件（起点: %s）", baseDir)
 
-		// 获取最新变更的 Go 文件（工作区+提交范围）
-		changedFiles, err := getChangedGoFiles(baseDir)
-		if err != nil {
-			log.Printf("Git检测失败（起点: %s），尝试备用策略: %v", baseDir, err)
-			fallbackFiles, fallbackErr := findAllGoFiles(baseDir)
-			if fallbackErr != nil {
-				return buildErrorResult(fmt.Sprintf("Git检测失败（起点: %s）: %v\n备用文件扫描也失败: %v\n\n请提供 projectPath 或 files 以明确项目位置。", baseDir, err, fallbackErr)), nil
-			}
-			log.Printf("使用备用策略：扫描到 %d 个Go文件（起点: %s）", len(fallbackFiles), baseDir)
-			changedFiles = fallbackFiles
-		}
-
-		log.Printf("智能检测到 %d 个变更的 Go 文件（起点: %s）", len(changedFiles), baseDir)
-
-		// 按项目分组变更文件，因为变更可能涉及多个项目
-		projectFiles := make(map[string][]string)
-		for _, file := range changedFiles {
-			projectRoot, err := getProjectRootFromFile(file)
-			if err != nil {
-				log.Printf("警告：无法确定文件 %s 的项目根目录：%v", file, err)
-				continue
-			}
-			projectFiles[projectRoot] = append(projectFiles[projectRoot], file)
-		}
-
-		// 对每个项目的变更文件进行检查（逐文件，多策略）
-		allIssues := make([]Issue, 0)
-		for projectRoot, files := range projectFiles {
-			log.Printf("检查项目 %s 中的 %d 个变更文件", projectRoot, len(files))
-
-			vendorMode := autoDetectVendorMode(projectRoot)
-			for _, file := range files {
-				log.Printf("开始检查文件: %s (项目: %s, vendorMode: %v)", file, projectRoot, vendorMode)
-
-				// 尝试1：完整JSON参数 + 绝对路径
-				args1 := []string{"run"}
-				if vendorMode {
-					args1 = append(args1, "--modules-download-mode=vendor")
-				}
-				args1 = append(args1, "--out-format", "json", "--print-issued-lines=false", "--print-linter-name=true", file)
-				res1, err1 := runGolangciLintWithArgs(projectRoot, args1)
-				if err1 != nil {
-					log.Printf("尝试1失败: %v", err1)
-				} else if res1 != nil && len(res1.Issues) > 0 {
-					log.Printf("尝试1成功，发现 %d 个问题", len(res1.Issues))
-					allIssues = append(allIssues, res1.Issues...)
-					continue
-				}
-
-				// 尝试2：最小JSON参数 + 绝对路径
-				args2 := []string{"run"}
-				if vendorMode {
-					args2 = append(args2, "--modules-download-mode=vendor")
-				}
-				args2 = append(args2, "--out-format", "json", file)
-				res2, err2 := runGolangciLintWithArgs(projectRoot, args2)
-				if err2 != nil {
-					log.Printf("尝试2失败: %v", err2)
-				} else if res2 != nil && len(res2.Issues) > 0 {
-					log.Printf("尝试2成功，发现 %d 个问题", len(res2.Issues))
-					allIssues = append(allIssues, res2.Issues...)
-					continue
-				}
-
-				// 尝试3：最小JSON参数 + 相对路径
-				rel := file
-				if rel2, err := filepath.Rel(projectRoot, file); err == nil && !strings.HasPrefix(rel2, "..") {
-					rel = rel2
-				}
-				args3 := []string{"run"}
-				if vendorMode {
-					args3 = append(args3, "--modules-download-mode=vendor")
-				}
-				args3 = append(args3, "--out-format", "json", rel)
-				res3, err3 := runGolangciLintWithArgs(projectRoot, args3)
-				if err3 != nil {
-					log.Printf("尝试3失败: %v", err3)
-				} else if res3 != nil && len(res3.Issues) > 0 {
-					log.Printf("尝试3成功，发现 %d 个问题", len(res3.Issues))
-					allIssues = append(allIssues, res3.Issues...)
-					continue
-				}
-
-				// 若三次均无，则记录一次提示（不作为硬错误）
-				log.Printf("文件 %s 三次尝试均未检出问题（vendorMode=%v）", file, vendorMode)
-			}
-		}
-
-		finalResult := &LintResult{Issues: allIssues}
-		resultJSON, _ := json.Marshal(finalResult)
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
-	}
-
-	// checkOnlyChanges=false 时，使用包路径进行全面检查
-	log.Printf("checkOnlyChanges=false，使用包路径进行全面检查")
-	projectPackages, err := getPackagesFromFiles(lintReq.Files)
+	// 获取最新变更的 Go 文件（工作区+提交范围）
+	changedFiles, baseCommit, strategy, err := getChangedGoFiles(baseDir)
 	if err != nil {
-		return buildErrorResult(fmt.Sprintf("获取包路径失败: %v", err)), nil
-	}
-	allIssues := make([]Issue, 0)
-	for projectRoot, packages := range projectPackages {
-		log.Printf("检查项目 %s 的包: %v", projectRoot, packages)
-		vendorMode := autoDetectVendorMode(projectRoot)
-		result, err := runGolangciLint(projectRoot, packages, "package", lintReq.CheckOnlyChanges, vendorMode)
-		if err != nil {
-			msg := fmt.Sprintf("执行 golangci-lint 失败\n项目: %s\n目标: %v\nvendorMode: %v\n错误: %v", projectRoot, packages, vendorMode, err)
-			return buildErrorResult(msg), nil
+		log.Printf("Git检测失败（起点: %s），尝试备用策略: %v", baseDir, err)
+		fallbackFiles, fallbackErr := findAllGoFiles(baseDir)
+		if fallbackErr != nil {
+			return buildErrorResult(fmt.Sprintf("Git检测失败（起点: %s）: %v\n备用文件扫描也失败: %v\n\n请提供 projectPath 或 files 以明确项目位置。", baseDir, err, fallbackErr)), nil
 		}
-		allIssues = append(allIssues, result.Issues...)
+		log.Printf("使用备用策略：扫描到 %d 个Go文件（起点: %s）", len(fallbackFiles), baseDir)
+		changedFiles = fallbackFiles
+		baseCommit = "" // 备用策略时不使用基准提交
+		strategy = "备用文件扫描"
 	}
+
+	log.Printf("检测策略: %s，基准提交: %s，变更文件: %d个", strategy, baseCommit, len(changedFiles))
+
+	// 按项目分组变更文件，因为变更可能涉及多个项目
+	projectFiles := make(map[string][]string)
+	for _, file := range changedFiles {
+		projectRoot, err := getProjectRootFromFile(file)
+		if err != nil {
+			log.Printf("警告：无法确定文件 %s 的项目根目录：%v", file, err)
+			continue
+		}
+		projectFiles[projectRoot] = append(projectFiles[projectRoot], file)
+	}
+
+	// 对每个项目进行包级智能检查
+	allIssues := make([]Issue, 0)
+	for projectRoot, files := range projectFiles {
+		log.Printf("检查项目 %s 中的 %d 个变更文件", projectRoot, len(files))
+
+		vendorMode := autoDetectVendorMode(projectRoot)
+		result, err := runGolangciLintForChangedPackages(projectRoot, files, baseCommit, vendorMode)
+		if err != nil {
+			log.Printf("项目 %s 检查失败: %v", projectRoot, err)
+			return buildErrorResult(fmt.Sprintf("代码检查失败\n项目: %s\n基准提交: %s\nvendorMode: %v\n错误: %v", projectRoot, baseCommit, vendorMode, err)), nil
+		}
+
+		if result != nil {
+			allIssues = append(allIssues, result.Issues...)
+		}
+	}
+
+	log.Printf("所有项目检查完成，总共发现 %d 个问题", len(allIssues))
 	finalResult := &LintResult{Issues: allIssues}
 	resultJSON, _ := json.Marshal(finalResult)
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(resultJSON)}}}, nil
@@ -1012,7 +927,21 @@ func getCurrentBranchSmart(projectRoot string) string {
 }
 
 func main() {
-	log.Println("启动 lint-mcp 服务 (兼容版本)...")
+	// 设置日志输出到文件
+	logFile, err := os.OpenFile("/tmp/lint-mcp-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		// 如果无法创建日志文件，使用stderr
+		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
+	// 设置日志输出格式，包含时间和文件位置
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Println("🚀 启动 lint-mcp 服务 (兼容版本)...")
+	log.Printf("📝 日志文件: /tmp/lint-mcp-debug.log")
+	log.Printf("🕐 启动时间: %s", time.Now().Format("2006-01-02 15:04:05"))
 
 	s := server.NewMCPServer(
 		"lint-mcp",
@@ -1021,18 +950,24 @@ func main() {
 
 	// 注册 code_lint 工具
 	tool := mcp.NewTool("code_lint",
-		mcp.WithDescription("智能Go代码检查工具。支持自动变更检测、精确包级检查和多项目处理。"),
+		mcp.WithDescription("智能Go代码检查工具。自动检测变更代码并进行精确的包级行级检查，避免历史代码问题干扰。支持多项目处理和智能依赖模式检测。"),
 		mcp.WithString("projectPath",
 			mcp.Description("项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"),
-		),
-		mcp.WithBoolean("checkOnlyChanges",
-			mcp.Description("是否启用智能变更检测（默认true）。将自动检测Git变更范围：未推送提交、分支分叉点或工作区变更。"),
 		),
 	)
 
 	s.AddTool(tool, handleCodeLintRequest)
 
 	log.Println("工具注册成功: code_lint")
+
+	// 启动时检查golangci-lint版本兼容性
+	if err := checkGolangciLintInstalled(); err != nil {
+		log.Printf("❌ golangci-lint 版本检查失败: %v", err)
+		log.Println("请按照提示升级golangci-lint后重启服务")
+		return
+	}
+	log.Println("✅ golangci-lint 版本检查通过")
+
 	log.Println("服务就绪，等待连接...")
 
 	if err := server.ServeStdio(s); err != nil {

@@ -6,9 +6,10 @@
 
 ### 系统要求
 
-- **Go 1.17+** (运行时环境)
-- **golangci-lint** (必须安装且在 PATH 中可用)
+- **Go 1.20+** (运行时环境)
+- **golangci-lint v2.4.0+** (必须安装且在 PATH 中可用，推荐 v2.4.0)
 - **Node.js 14.0+** (用于 npm 包管理)
+- **Git** (用于智能变更检测)
 
 ### 通过 npm 安装（推荐）
 
@@ -72,7 +73,10 @@ npm view lint-mcp
   "mcpServers": {
     "lint-mcp": {
       "command": "npx",
-      "args": ["lint-mcp"]
+      "args": [
+        "-y",
+        "lint-mcp@latest"
+      ]
     }
   }
 }
@@ -148,7 +152,7 @@ npm view lint-mcp
    - **多项目支持**: 自动分组处理跨项目变更
 
 3. **代码检查引擎**
-   - 集成 **golangci-lint** (兼容多版本，推荐 v1.52.2)
+   - 集成 **golangci-lint** (兼容 v1.52.2+ 和 v2.4.0+，推荐 v2.4.0)
    - JSON 输出解析，支持复杂输出格式提取
    - 多重策略检查：绝对路径→相对路径→包路径
    - 智能错误恢复和降级处理
@@ -167,23 +171,27 @@ npm view lint-mcp
 ## 📝 使用说明
 
 ### 安装要求
-1. 安装 golangci-lint v1.52.2：
+1. 安装 golangci-lint v2.4.0（推荐）：
    ```bash
-   # 方法1 - 使用 Go install
-   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
-
-   # 方法2 - 使用 Homebrew（macOS）
+   # 方法1 - 使用 Homebrew（macOS，推荐）
    brew install golangci-lint
-   brew pin golangci-lint && brew install golangci-lint@1.52.2
+   # 确认版本
+   golangci-lint version
+
+   # 方法2 - 使用 Go install
+   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0
 
    # 方法3 - 使用安装脚本
-   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.52.2
+   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
    ```
 
-2. 确保 golangci-lint 在 PATH 中：
+2. 确保 golangci-lint 在 PATH 中且版本兼容：
    ```bash
-   golangci-lint --version
+   golangci-lint version
+   # 应显示 golangci-lint has version 2.4.0 或更高版本
    ```
+
+**重要提示**：本工具需要 golangci-lint v2.4.0+ 或 v1.52.2+。如果您的系统中有多个版本，请确保 PATH 中的版本是兼容的。可以通过 `which golangci-lint` 检查当前使用的版本路径。
 
 ### API 说明
 
@@ -191,16 +199,18 @@ npm view lint-mcp
 ```json
 {
   "files": ["/absolute/path/to/file1.go"],  // 可选，用于确定检查起点
-  "projectPath": "/absolute/path/to/project", // 可选，项目根目录（优先级高于files）
-  "checkOnlyChanges": true   // 可选，默认 true，启用智能变更检测
+  "projectPath": "/absolute/path/to/project" // 可选，项目根目录（优先级高于files）
 }
 ```
 
 **参数说明**：
 - `projectPath`: 项目根目录绝对路径（推荐），优先级最高
 - `files`: 项目内任一文件的绝对路径，用于推断项目根目录
-- `checkOnlyChanges`: 是否只检查变更的代码（默认 true）
-- `vendorMode`: 依赖模式（已移除，改为自动检测）
+
+**重要变更**：
+- ✅ **默认智能检测**：工具现在默认只检查变更的代码，无需 `checkOnlyChanges` 参数
+- ✅ **自动依赖模式**：通过分析 `.gitignore` 自动检测依赖模式，无需 `vendorMode` 参数
+- ✅ **版本兼容**：自动检测 golangci-lint 版本并使用兼容的参数
 
 **智能检测策略**（按优先级）：
 - **策略1**：检测未推送的提交（本地领先远程分支的提交）
@@ -336,7 +346,7 @@ npm view lint-mcp
 
 ### 运行时要求
 - **Go 1.20+** (基于 go.mod 中的版本要求)
-- **golangci-lint** (推荐 v1.52.2，需要在 PATH 中可用)
+- **golangci-lint v2.4.0+** (推荐 v2.4.0，需要在 PATH 中可用)
 - **Git** (用于智能变更检测)
 
 ### 开发依赖
@@ -350,8 +360,7 @@ npm view lint-mcp
 {
   "name": "code_lint",
   "arguments": {
-    "projectPath": "/Users/username/project",
-    "checkOnlyChanges": true
+    "projectPath": "/Users/username/project"
   }
 }
 ```
@@ -361,19 +370,7 @@ npm view lint-mcp
 {
   "name": "code_lint",
   "arguments": {
-    "files": ["/Users/username/project/main.go"],
-    "checkOnlyChanges": true
-  }
-}
-```
-
-#### 全量检查模式
-```json
-{
-  "name": "code_lint", 
-  "arguments": {
-    "projectPath": "/Users/username/project",
-    "checkOnlyChanges": false
+    "files": ["/Users/username/project/main.go"]
   }
 }
 ```
@@ -390,9 +387,11 @@ npm view lint-mcp
 
 - `projectPath` (可选，推荐): 项目根目录的绝对路径，优先级最高。推荐使用此参数以获得最佳性能
 - `files` (可选): 项目内任一文件的绝对路径列表，用于推断项目根目录。当 `projectPath` 未指定时使用
-- `checkOnlyChanges` (可选): 是否启用智能变更检测，默认 `true`。启用后自动检测 Git 变更范围，大幅提升检查效率
 
-**注意**：`vendorMode` 参数已移除，现在通过分析项目 `.gitignore` 文件自动检测依赖模式
+**重要变更**：
+- ✅ **默认智能检测**：工具现在默认只检查变更的代码，移除了 `checkOnlyChanges` 参数
+- ✅ **自动依赖模式**：移除了 `vendorMode` 参数，现在通过分析项目 `.gitignore` 文件自动检测依赖模式
+- ✅ **版本兼容**：自动检测 golangci-lint 版本并使用兼容的输出参数
 
 ### 重要提示
 
@@ -412,7 +411,7 @@ npm view lint-mcp
 
 ## 📈 版本信息
 
-### 当前版本：v1.0.2
+### 当前版本：v1.1.0
 
 **核心特性**：
 - ✅ 智能 Git 变更检测（5种策略）
@@ -422,10 +421,23 @@ npm view lint-mcp
 - ✅ 零配置智能启动
 - ✅ 完善的错误恢复机制
 - 🚀 **优化的分支检测**：智能单分支比对，性能提升60-80%
+- 🎯 **版本兼容性**：自动检测并支持 golangci-lint v1.52.2+ 和 v2.4.0+
+- 📝 **简化API**：移除冗余参数，默认智能检测
 
 ### 更新日志
 
-#### v1.0.2 (当前版本)
+#### v1.1.0 (当前版本)
+- 🎯 **版本兼容性**：自动检测 golangci-lint 版本并使用兼容参数
+  - 支持 v2.4.0+ 使用 `--output.json.path stdout`
+  - 支持 v1.52.2+ 使用 `--out-format json`
+  - 自动路径检测，优先使用 PATH 中的版本
+- 📝 **API 简化**：移除冗余参数，提升用户体验
+  - 移除 `checkOnlyChanges` 参数，默认启用智能检测
+  - 移除 `vendorMode` 参数，自动检测依赖模式
+- 🔧 **错误处理**：增强版本不兼容时的错误提示和解决方案
+- 🚀 **性能优化**：动态参数选择，避免版本冲突导致的性能问题
+
+#### v1.0.2
 - 🚀 **性能优化**：重构分支检测逻辑，减少60-80%的Git命令调用
 - 🎯 **精准检测**：只与项目实际主分支比对，避免无效尝试
 - 📝 **日志优化**：更清晰的检测过程日志，减少噪音信息
@@ -446,6 +458,33 @@ npm view lint-mcp
 ### 技术债务和限制
 
 1. **平台二进制**：当前每个平台需要单独编译二进制文件
-2. **golangci-lint 依赖**：用户需要预先安装 golangci-lint
+2. **golangci-lint 依赖**：用户需要预先安装兼容版本的 golangci-lint (v1.52.2+ 或 v2.4.0+)
 3. **Git 依赖**：智能检测功能依赖 Git 仓库环境
-4. **JSON 解析**：复杂的 golangci-lint 输出解析逻辑
+4. **版本检测开销**：首次启动时需要检测 golangci-lint 版本兼容性
+
+### 故障排除
+
+#### golangci-lint 版本问题
+如果遇到 `unknown flag` 或 `unsupported version` 错误：
+
+1. **检查版本**：
+   ```bash
+   golangci-lint version
+   which golangci-lint
+   ```
+
+2. **清理旧版本**：
+   ```bash
+   # 检查是否有多个版本
+   ls -la $GOPATH/bin/golangci-lint
+   ls -la /opt/homebrew/bin/golangci-lint
+   
+   # 删除 GOPATH 中的旧版本（如果存在）
+   rm $GOPATH/bin/golangci-lint
+   ```
+
+3. **安装兼容版本**：
+   ```bash
+   # 推荐使用 Homebrew（会自动安装最新兼容版本）
+   brew install golangci-lint
+   ```
