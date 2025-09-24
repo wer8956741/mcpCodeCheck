@@ -1862,7 +1862,7 @@ func handleCodeReview(request *CodeReviewRequest) (*mcp.CallToolResult, error) {
 			riskByCategory[risk.Category]++
 			riskBySeverity[risk.Severity]++
 		}
-		
+
 		// 更新整体风险等级
 		if file.RiskLevel == "high" {
 			overallRiskLevel = "high"
@@ -1982,4 +1982,3 @@ func main() {
 		log.Printf("服务错误: %v\n", err)
 	}
 }
-
