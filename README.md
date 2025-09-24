@@ -123,12 +123,20 @@ npm view lint-mcp
 - **手动覆盖**: 支持通过 `vendorMode` 参数手动指定模式
 - **性能优化**: Vendor 模式避免网络依赖，检查速度更快
 
-### 3. 智能代码检查
-- **统一智能工具** (`code_lint`): 
+### 3. 双工具架构
+- **代码质量检查** (`code_lint`): 
+  - 基于 golangci-lint 的传统代码检查
   - 自动变更检测：智能识别分支开发范围
   - 精确包级检查：避免跨文件引用误报
   - 多项目支持：自动处理涉及多个项目的变更
   - 多策略检测：未推送提交 → 分支分叉点 → 工作区变更
+
+- **智能风险检测** (`code_review`): 
+  - 专注于运行时风险和安全问题检测
+  - 17种 Go 资源模式识别（事务、锁、文件、panic等）
+  - 结构化风险数据输出，配合 Cursor Rule 使用
+  - 智能上下文扩展，提供完整资源生命周期
+  - 零 token 浪费，专注数据而非提示词生成
 
 ### 4. 自动项目处理
 - 智能识别变更文件所属的项目根目录
@@ -195,7 +203,9 @@ npm view lint-mcp
 
 ### API 说明
 
-#### 智能代码检查 (code_lint)
+#### 1. 智能代码检查 (code_lint)
+基于 golangci-lint 的传统代码质量检查：
+
 ```json
 {
   "files": ["/absolute/path/to/file1.go"],  // 可选，用于确定检查起点
@@ -212,6 +222,31 @@ npm view lint-mcp
 - ✅ **自动依赖模式**：通过分析 `.gitignore` 自动检测依赖模式，无需 `vendorMode` 参数
 - ✅ **版本兼容**：自动检测 golangci-lint 版本并使用兼容的参数
 
+#### 2. 智能风险检测 (code_review)
+专注于运行时风险和安全问题的智能检测：
+
+```json
+{
+  "projectPath": "/absolute/path/to/project",     // 可选，项目根目录
+  "reviewFocus": ["concurrency", "transaction", "resource", "panic_safety"]  // 可选，关注领域
+}
+```
+
+**参数说明**：
+- `projectPath`: 项目根目录绝对路径（可选，优先作为检测起点）
+- `reviewFocus`: 关注点列表，可选值：
+  - `concurrency`: 并发安全（锁、goroutine、竞态条件）
+  - `transaction`: 事务管理（数据库事务、连接泄漏）
+  - `resource`: 资源管理（文件、网络连接、内存）
+  - `panic_safety`: Panic安全（数组越界、空指针、类型断言）
+  - `performance`: 性能问题（内存分配、循环效率）
+
+**核心特性**：
+- 🎯 **零配置检测**：自动识别变更代码和资源作用域
+- 🧠 **智能上下文扩展**：变更在资源作用域内时，提供完整上下文
+- 📊 **结构化输出**：返回风险点数据而非提示词，配合 Cursor Rule 使用
+- ⚡ **高效 Token 使用**：相比传统方案减少 60-80% token 消耗
+
 **智能检测策略**（按优先级）：
 - **策略1**：检测未推送的提交（本地领先远程分支的提交）
 - **策略2**：检测分支分叉点（当前分支与 main/master 分支的分叉点）
@@ -220,12 +255,14 @@ npm view lint-mcp
 - **备用策略**：最近一次提交（HEAD~1）或目录扫描
 
 ### 返回结果
+
+#### code_lint 返回格式
 ```json
 {
   "Issues": [
     {
       "FromLinter": "linter名称",
-      "Text": "问题描述",
+      "Text": "问题描述", 
       "Severity": "严重程度",
       "Pos": {
         "Filename": "文件名",
@@ -237,14 +274,71 @@ npm view lint-mcp
 }
 ```
 
+#### code_review 返回格式
+```json
+{
+  "summary": {
+    "totalChangedFiles": 1,
+    "totalRiskPoints": 3,
+    "riskLevel": "high",
+    "riskByCategory": {"transaction": 2, "panic_safety": 1},
+    "riskBySeverity": {"high": 1, "medium": 2},
+    "processingTime": "150ms"
+  },
+  "changedFiles": [
+    {
+      "file": "/path/to/file.go",
+      "changedLines": [
+        {"lineNumber": 325, "type": "added", "content": "tx, err := db.Begin()"}
+      ],
+      "riskPoints": [
+        {
+          "id": "transaction_start_325_1",
+          "type": "transaction_start",
+          "category": "transaction",
+          "line": 325,
+          "severity": "high",
+          "description": "事务开启，需确保正确关闭",
+          "context": "tx, err := db.Begin()",
+          "suggestion": "添加defer tx.Rollback()或在成功时调用tx.Commit()"
+        }
+      ],
+      "riskLevel": "high"
+    }
+  ],
+  "processingTime": "150ms"
+}
+```
+
 ## 🔍 最佳实践
+
+### 工具选择指南
+
+#### 使用 code_lint 当您需要：
+- 传统的代码质量检查（语法、格式、最佳实践）
+- 基于 golangci-lint 的全面静态分析
+- CI/CD 流水线中的代码质量门禁
+- 团队代码规范统一检查
+
+#### 使用 code_review 当您需要：
+- 运行时风险和安全问题检测
+- 资源泄漏和并发安全分析
+- 配合 AI 进行智能代码审查
+- 专注于业务逻辑中的潜在风险
+
+### 最佳实践建议
 
 1. **增量检查模式**
    - 默认使用增量检查模式（`checkOnlyChanges: true`）
    - 只关注当前变更的代码质量
    - 适合持续集成和日常开发
 
-2. **依赖模式自动检测**
+2. **双工具协作**
+   - 使用 `code_lint` 进行基础代码质量检查
+   - 使用 `code_review` 进行深度风险分析
+   - 结合 Cursor Rule 实现智能代码审查
+
+3. **依赖模式自动检测**
    - **自动判断**：通过分析项目 `.gitignore` 文件自动选择最佳模式
    - **Vendor 模式**：当 `.gitignore` 不包含完整 `vendor/` 目录忽略时使用
      - 使用 `--modules-download-mode=vendor` 参数
@@ -253,12 +347,12 @@ npm view lint-mcp
      - 适合纯 Go modules 项目
      - 需要网络连接下载依赖
 
-3. **全量检查时机**
+4. **全量检查时机**
    - 新项目初始化时
    - 重要版本发布前
    - 代码质量专项治理时
 
-4. **智能检测使用场景**
+5. **智能检测使用场景**
    - **开发分支**：自动检测整个特性开发的所有变更
    - **多次提交**：无需手动指定范围，自动涵盖所有相关提交
    - **多项目变更**：自动处理涉及多个项目的变更
@@ -270,6 +364,20 @@ npm view lint-mcp
 - 自动识别并使用 MCP 服务
 - 无需额外配置
 - 实时代码质量反馈
+
+#### 配合 Cursor Rule 使用 code_review
+为了充分发挥 `code_review` 工具的智能风险检测能力，建议配合 Cursor Rule 使用：
+
+1. **创建 Cursor Rule**：参考 `CURSOR_RULE_EXAMPLE.md` 文件
+2. **配置规则**：根据项目需求调整风险响应策略
+3. **智能交互**：Rule 接收风险数据，生成针对性的提示词
+4. **高效审查**：AI 基于结构化数据进行精准分析
+
+**优势**：
+- 🎯 **精准分析**：基于具体风险点而非通用提示词
+- ⚡ **高效交互**：减少 60-80% token 消耗
+- 🔧 **可定制性**：不同项目可配置不同的审查策略
+- 📊 **数据驱动**：基于风险统计进行决策
 
 ### CI/CD
 - 支持命令行调用
@@ -411,7 +519,7 @@ npm view lint-mcp
 
 ## 📈 版本信息
 
-### 当前版本：v1.1.0
+### 当前版本：v1.2.0
 
 **核心特性**：
 - ✅ 智能 Git 变更检测（5种策略）
@@ -423,10 +531,27 @@ npm view lint-mcp
 - 🚀 **优化的分支检测**：智能单分支比对，性能提升60-80%
 - 🎯 **版本兼容性**：自动检测并支持 golangci-lint v1.52.2+ 和 v2.4.0+
 - 📝 **简化API**：移除冗余参数，默认智能检测
+- 🆕 **双工具架构**：`code_lint` + `code_review` 提供全面的代码质量保障
+- 🧠 **智能风险检测**：17种 Go 资源模式识别，专注运行时风险
+- ⚡ **Token 优化**：结构化数据输出，减少 60-80% AI token 消耗
 
 ### 更新日志
 
-#### v1.1.0 (当前版本)
+#### v1.2.0 (当前版本)
+- 🆕 **双工具架构**：新增 `code_review` 工具，专注运行时风险检测
+  - 17种 Go 资源模式识别（事务、锁、文件、panic等）
+  - 智能上下文扩展，提供完整资源生命周期
+  - 结构化风险数据输出，配合 Cursor Rule 使用
+- ⚡ **Token 优化**：重构输出格式，减少 60-80% AI token 消耗
+  - 移除冗余的提示词生成，专注数据输出
+  - 智能风险点分类和严重程度评估
+  - 支持按分类和严重程度的风险统计
+- 🎯 **架构优化**：分离关注点，提高可维护性
+  - `code_lint`：专注传统代码质量检查
+  - `code_review`：专注运行时风险和安全问题
+  - 支持独立使用或协同工作
+
+#### v1.1.0
 - 🎯 **版本兼容性**：自动检测 golangci-lint 版本并使用兼容参数
   - 支持 v2.4.0+ 使用 `--output.json.path stdout`
   - 支持 v1.52.2+ 使用 `--out-format json`

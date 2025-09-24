@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +33,116 @@ func buildErrorResult(message string) *mcp.CallToolResult {
 type CodeLintRequest struct {
 	Files       []string `json:"files" description:"参考文件列表（可选，用于确定检查起点）。工具将自动智能检测当前工作目录的所有变更文件。" required:"false"`
 	ProjectPath string   `json:"projectPath" description:"项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"`
+}
+
+// CodeReviewRequest 定义代码审查请求结构（简化版）
+type CodeReviewRequest struct {
+	ProjectPath string   `json:"projectPath" description:"项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"`
+	ReviewFocus []string `json:"reviewFocus" description:"关注点列表，如 ['concurrency', 'transaction', 'resource', 'performance']，默认全部" required:"false"`
+}
+
+// FileAnalysis 文件分析结果（重构版）
+type FileAnalysis struct {
+	File         string        `json:"file"`         // 文件路径
+	ChangedLines []ChangedLine `json:"changedLines"` // 变更行信息
+	RiskPoints   []RiskPoint   `json:"riskPoints"`   // 风险点列表
+	RiskLevel    string        `json:"riskLevel"`    // "high", "medium", "low", "none"
+}
+
+// ResourceScope 资源作用域信息（优化版）
+type ResourceScope struct {
+	ID           string   `json:"id"`           // 唯一标识符
+	Type         string   `json:"type"`         // "transaction", "mutex", "file", "http_response"
+	StartLine    int      `json:"startLine"`    // 资源开启行号
+	EndLine      int      `json:"endLine"`      // 资源关闭行号
+	OpenPattern  string   `json:"openPattern"`  // 开启模式，如 "tx, err := db.Begin()"
+	ClosePattern string   `json:"closePattern"` // 关闭模式，如 "tx.Commit()"
+	Variable     string   `json:"variable"`     // 资源变量名，如 "tx", "mu", "file"
+	HasChanges   bool     `json:"hasChanges"`   // 变更是否在此作用域内
+	RiskPatterns []string `json:"riskPatterns"` // 潜在风险模式
+	ContextCode  string   `json:"contextCode"`  // 完整的作用域代码
+}
+
+// ResourcePattern 资源模式定义
+type ResourcePattern struct {
+	Type         string   `json:"Type"`         // 资源类型
+	Name         string   `json:"Name"`         // 资源名称（中文）
+	OpenRegex    string   `json:"OpenRegex"`    // 开启模式正则
+	CloseRegex   string   `json:"CloseRegex"`   // 关闭模式正则
+	RiskPatterns []string `json:"RiskPatterns"` // 风险模式描述
+}
+
+// ChangedLine 变更行信息
+type ChangedLine struct {
+	LineNumber int    `json:"LineNumber"` // 行号
+	Content    string `json:"Content"`    // 行内容
+	Type       string `json:"Type"`       // "added", "modified", "deleted"
+}
+
+// ContextBlock 上下文代码块
+type ContextBlock struct {
+	Type      string `json:"Type"`      // 上下文类型，如 "transaction", "function"
+	StartLine int    `json:"StartLine"` // 起始行号
+	EndLine   int    `json:"EndLine"`   // 结束行号
+	Code      string `json:"Code"`      // 代码内容
+	Reason    string `json:"Reason"`    // 包含此上下文的原因
+}
+
+// EnhancedContext 增强的代码上下文
+type EnhancedContext struct {
+	ChangedLines   []ChangedLine   `json:"ChangedLines"`   // 变更的代码行
+	ResourceScopes []ResourceScope `json:"ResourceScopes"` // 检测到的资源作用域
+	ContextBlocks  []ContextBlock  `json:"ContextBlocks"`  // 相关上下文块
+	ProjectPath    string          `json:"ProjectPath"`    // 项目路径
+	BaseCommit     string          `json:"BaseCommit"`     // 基准提交
+	Strategy       string          `json:"Strategy"`       // 检测策略
+}
+
+// RiskPoint 风险点定义
+type RiskPoint struct {
+	ID          string `json:"id"`          // 唯一标识符
+	Type        string `json:"type"`        // 风险类型: "transaction_leak", "panic_risk", "resource_leak"
+	Category    string `json:"category"`    // 风险分类: "transaction", "concurrency", "panic_safety", "resource"
+	Line        int    `json:"line"`        // 风险行号
+	Severity    string `json:"severity"`    // 严重程度: "high", "medium", "low"
+	Description string `json:"description"` // 风险描述
+	Context     string `json:"context"`     // 关键代码片段
+	Suggestion  string `json:"suggestion"`  // 修复建议
+}
+
+// AIInstructions AI结构化指令对象（优化版）
+type AIInstructions struct {
+	Type                string   `json:"type"`                 // 指令类型，如 "code_review_prompt"
+	Priority            string   `json:"priority"`             // 优先级: "high", "medium", "low"
+	Action              string   `json:"action"`               // 行动指令: "analyze_and_respond"
+	Prompt              string   `json:"prompt"`               // 精简提示词
+	FocusAreas          []string `json:"focus_areas"`          // 关注领域
+	ExpectedOutput      string   `json:"expected_output"`      // 期望输出格式
+	Language            string   `json:"language"`             // 编程语言
+	AnalysisDepth       string   `json:"analysis_depth"`       // 分析深度: "shallow", "medium", "deep"
+	IncludeSuggestions  bool     `json:"include_suggestions"`  // 是否包含修复建议
+	IncludeExamples     bool     `json:"include_examples"`     // 是否包含代码示例
+	RiskThreshold       string   `json:"risk_threshold"`       // 风险阈值: "low", "medium", "high"
+	OutputFormat        string   `json:"output_format"`        // 输出格式: "json", "markdown", "structured"
+	ContextType         string   `json:"context_type"`         // 上下文类型
+	ConfidenceThreshold float64  `json:"confidence_threshold"` // 置信度阈值
+}
+
+// CodeReviewOutput 代码审查输出结果（重构版 - 专注风险数据）
+type CodeReviewOutput struct {
+	Summary        ReviewSummary  `json:"summary"`        // 概览信息
+	ChangedFiles   []FileAnalysis `json:"changedFiles"`   // 变更文件分析（包含风险点）
+	ProcessingTime string         `json:"processingTime"` // 处理时间
+}
+
+// ReviewSummary 审查概览（重构版 - 专注风险统计）
+type ReviewSummary struct {
+	TotalChangedFiles int            `json:"totalChangedFiles"` // 变更文件数
+	TotalRiskPoints   int            `json:"totalRiskPoints"`   // 总风险点数
+	RiskLevel         string         `json:"riskLevel"`         // "high", "medium", "low", "none"
+	RiskByCategory    map[string]int `json:"riskByCategory"`    // 按分类统计风险: {"transaction": 2, "panic_safety": 1}
+	RiskBySeverity    map[string]int `json:"riskBySeverity"`    // 按严重程度统计: {"high": 1, "medium": 2}
+	ProcessingTime    string         `json:"processingTime"`    // 处理时间
 }
 
 // GolangciLintOutput golangci-lint 的实际输出格式
@@ -926,6 +1039,870 @@ func getCurrentBranchSmart(projectRoot string) string {
 	return ""
 }
 
+// ==================== AI代码审查功能 ====================
+
+// 支持的资源模式定义
+var SupportedResourcePatterns = []ResourcePattern{
+	{
+		Type:       "transaction",
+		Name:       "数据库事务",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*\w*\.Begin\w*\(`,
+		CloseRegex: `(\w+)\.(?:Commit|Rollback)\(\)`,
+		RiskPatterns: []string{
+			"事务开启后未正确关闭",
+			"错误路径中缺少事务回滚",
+			"事务嵌套导致死锁",
+			"长时间持有事务连接",
+		},
+	},
+	{
+		Type:       "mutex",
+		Name:       "互斥锁",
+		OpenRegex:  `(\w+)\.(?:Lock|RLock)\(\)`,
+		CloseRegex: `(\w+)\.(?:Unlock|RUnlock)\(\)`,
+		RiskPatterns: []string{
+			"锁获取后未释放",
+			"错误路径中缺少锁释放",
+			"锁的获取和释放不匹配",
+			"可能导致死锁的锁顺序",
+		},
+	},
+	{
+		Type:       "file",
+		Name:       "文件句柄",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*(?:os\.Open|os\.Create|ioutil\.ReadFile)\(`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"文件打开后未关闭",
+			"错误路径中文件句柄泄漏",
+			"defer语句缺失",
+			"文件句柄重复关闭",
+		},
+	},
+	{
+		Type:       "http_response",
+		Name:       "HTTP响应",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*http\.(?:Get|Post|Do)\(`,
+		CloseRegex: `(\w+)\.Body\.Close\(\)`,
+		RiskPatterns: []string{
+			"HTTP响应体未关闭",
+			"连接池资源泄漏",
+			"defer语句缺失",
+			"响应体重复关闭",
+		},
+	},
+	{
+		Type:       "context",
+		Name:       "上下文取消",
+		OpenRegex:  `(\w+),\s*(\w+)\s*:=\s*context\.WithCancel\(`,
+		CloseRegex: `(\w+)\(\)`,
+		RiskPatterns: []string{
+			"上下文取消函数未调用",
+			"goroutine泄漏风险",
+			"资源清理不完整",
+			"超时控制失效",
+		},
+	},
+	{
+		Type:       "sql_rows",
+		Name:       "数据库查询结果",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*\w*\.Query\w*\(`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"查询结果未关闭导致连接泄漏",
+			"defer rows.Close()缺失",
+			"错误路径中结果集未关闭",
+			"连接池耗尽风险",
+		},
+	},
+	{
+		Type:       "grpc_conn",
+		Name:       "gRPC连接",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*grpc\.Dial\w*\(`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"gRPC连接未关闭",
+			"连接资源泄漏",
+			"defer conn.Close()缺失",
+			"服务端连接数过多",
+		},
+	},
+	{
+		Type:       "temp_dir",
+		Name:       "临时目录",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*(?:ioutil\.TempDir|os\.MkdirTemp)\(`,
+		CloseRegex: `os\.RemoveAll\((\w+)\)`,
+		RiskPatterns: []string{
+			"临时目录未清理",
+			"磁盘空间泄漏",
+			"defer清理语句缺失",
+			"系统临时目录堆积",
+		},
+	},
+	{
+		Type:       "redis_conn",
+		Name:       "Redis连接",
+		OpenRegex:  `(\w+)\s*:=\s*\w*\.Get\(\)`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"Redis连接未归还连接池",
+			"连接池资源耗尽",
+			"defer conn.Close()缺失",
+			"连接超时未处理",
+		},
+	},
+	{
+		Type:       "channel",
+		Name:       "消息队列通道",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*\w*\.Channel\(\)`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"消息通道未关闭",
+			"AMQP连接资源泄漏",
+			"defer ch.Close()缺失",
+			"消息队列连接数过多",
+		},
+	},
+	{
+		Type:       "zip_reader",
+		Name:       "压缩文件读取",
+		OpenRegex:  `(\w+),\s*err\s*:=\s*zip\.OpenReader\(`,
+		CloseRegex: `(\w+)\.Close\(\)`,
+		RiskPatterns: []string{
+			"压缩文件读取器未关闭",
+			"文件描述符泄漏",
+			"defer reader.Close()缺失",
+			"大文件处理内存泄漏",
+		},
+	},
+	{
+		Type:       "ticker",
+		Name:       "定时器",
+		OpenRegex:  `(\w+)\s*:=\s*time\.NewTicker\(`,
+		CloseRegex: `(\w+)\.Stop\(\)`,
+		RiskPatterns: []string{
+			"定时器未停止",
+			"goroutine泄漏风险",
+			"defer ticker.Stop()缺失",
+			"内存持续增长",
+		},
+	},
+	{
+		Type:       "buffer_pool",
+		Name:       "缓冲池",
+		OpenRegex:  `(\w+)\s*:=\s*\w*\.Get\(\)`,
+		CloseRegex: `\w*\.Put\((\w+)\)`,
+		RiskPatterns: []string{
+			"缓冲区未归还池中",
+			"内存池效率降低",
+			"defer pool.Put()缺失",
+			"内存使用不当",
+		},
+	},
+	{
+		Type:       "waitgroup",
+		Name:       "等待组",
+		OpenRegex:  `(\w+)\.Add\(\d+\)`,
+		CloseRegex: `(\w+)\.Done\(\)`,
+		RiskPatterns: []string{
+			"WaitGroup计数不匹配",
+			"goroutine永久阻塞",
+			"defer wg.Done()缺失",
+			"并发控制失效",
+		},
+	},
+	{
+		Type:       "panic_recovery",
+		Name:       "Panic恢复机制",
+		OpenRegex:  `defer\s+func\(\)\s*\{[^}]*recover\(\)`,
+		CloseRegex: `\}\(\)`,
+		RiskPatterns: []string{
+			"panic未被正确捕获",
+			"recover()调用位置不当",
+			"错误信息丢失",
+			"程序异常终止风险",
+		},
+	},
+	{
+		Type:       "slice_bounds",
+		Name:       "切片边界检查",
+		OpenRegex:  `if\s+len\((\w+)\)\s*[><=]+\s*\d+`,
+		CloseRegex: `(\w+)\[.*\]`,
+		RiskPatterns: []string{
+			"数组/切片越界访问",
+			"边界检查缺失",
+			"panic: index out of range",
+			"运行时崩溃风险",
+		},
+	},
+	{
+		Type:       "type_assertion",
+		Name:       "类型断言安全",
+		OpenRegex:  `(\w+),\s*(\w+)\s*:=\s*.*\.\(.*\)`,
+		CloseRegex: `if\s+!(\w+)`,
+		RiskPatterns: []string{
+			"类型断言失败导致panic",
+			"ok检查缺失",
+			"类型转换不安全",
+			"运行时类型错误",
+		},
+	},
+	{
+		Type:       "nil_pointer",
+		Name:       "空指针检查",
+		OpenRegex:  `if\s+(\w+)\s*!=\s*nil`,
+		CloseRegex: `(\w+)\..*`,
+		RiskPatterns: []string{
+			"空指针解引用",
+			"nil检查缺失",
+			"panic: runtime error",
+			"指针访问不安全",
+		},
+	},
+}
+
+// detectResourceScopes 检测代码中的资源作用域
+func detectResourceScopes(fileContent string, changedLines []int) ([]ResourceScope, error) {
+	lines := strings.Split(fileContent, "\n")
+	var scopes []ResourceScope
+
+	for _, pattern := range SupportedResourcePatterns {
+		foundScopes := findResourceScopes(lines, pattern, changedLines)
+		scopes = append(scopes, foundScopes...)
+	}
+
+	log.Printf("检测到 %d 个资源作用域", len(scopes))
+	return scopes, nil
+}
+
+// findResourceScopes 查找特定模式的资源作用域
+func findResourceScopes(lines []string, pattern ResourcePattern, changedLines []int) []ResourceScope {
+	var scopes []ResourceScope
+	openRegex := regexp.MustCompile(pattern.OpenRegex)
+	closeRegex := regexp.MustCompile(pattern.CloseRegex)
+
+	for i, line := range lines {
+		if matches := openRegex.FindStringSubmatch(line); matches != nil {
+			variable := ""
+			if len(matches) > 1 {
+				variable = matches[1] // 提取变量名
+			}
+
+			// 寻找对应的关闭语句
+			closeLineIdx := findMatchingClose(lines, i, variable, closeRegex)
+			if closeLineIdx > i {
+				scope := ResourceScope{
+					Type:         pattern.Type,
+					StartLine:    i + 1,
+					EndLine:      closeLineIdx + 1,
+					OpenPattern:  strings.TrimSpace(line),
+					ClosePattern: strings.TrimSpace(lines[closeLineIdx]),
+					Variable:     variable,
+				}
+
+				// 检查变更是否在此作用域内
+				for _, changedLine := range changedLines {
+					if changedLine > scope.StartLine && changedLine < scope.EndLine {
+						scope.HasChanges = true
+						break
+					}
+				}
+
+				scopes = append(scopes, scope)
+				log.Printf("发现%s作用域: %d-%d行, 变量: %s, 包含变更: %v",
+					pattern.Name, scope.StartLine, scope.EndLine, scope.Variable, scope.HasChanges)
+			}
+		}
+	}
+
+	return scopes
+}
+
+// findMatchingClose 查找匹配的关闭语句（找到最后一个匹配的）
+func findMatchingClose(lines []string, startIdx int, variable string, closeRegex *regexp.Regexp) int {
+	lastMatch := -1
+	for i := startIdx + 1; i < len(lines); i++ {
+		line := lines[i]
+		if matches := closeRegex.FindStringSubmatch(line); matches != nil {
+			// 如果有变量名，检查是否匹配
+			if variable != "" && len(matches) > 1 {
+				if matches[1] == variable {
+					lastMatch = i
+				}
+			} else {
+				// 没有变量名或无法提取变量名，直接匹配模式
+				lastMatch = i
+			}
+		}
+	}
+	return lastMatch
+}
+
+// extractChangedLines 从Git diff中提取变更行信息
+func extractChangedLines(filePath, baseCommit string) ([]ChangedLine, error) {
+	var changedLines []ChangedLine
+
+	// 读取当前文件内容
+	fileContent, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return changedLines, fmt.Errorf("读取文件失败: %v", err)
+	}
+	fileLines := strings.Split(string(fileContent), "\n")
+
+	// 获取文件的Git diff
+	cmd := exec.Command("git", "diff", baseCommit, "HEAD", "--unified=3", filePath)
+	cmd.Dir = filepath.Dir(filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		// 如果Git diff失败，尝试检查工作区变更
+		cmd = exec.Command("git", "diff", "--unified=3", filePath)
+		cmd.Dir = filepath.Dir(filePath)
+		output, err = cmd.Output()
+		if err != nil {
+			return changedLines, fmt.Errorf("无法获取文件diff: %v", err)
+		}
+	}
+
+	// 解析diff输出，提取变更行
+	lines := strings.Split(string(output), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "@@") {
+			// 解析行号范围，如 @@ -10,5 +10,7 @@
+			re := regexp.MustCompile(`@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
+			matches := re.FindStringSubmatch(line)
+			if len(matches) >= 2 {
+				startLine, _ := strconv.Atoi(matches[1])
+
+				// 解析后续的diff行，提取实际变更内容
+				for j := i + 1; j < len(lines); j++ {
+					diffLine := lines[j]
+					if strings.HasPrefix(diffLine, "@@") {
+						break // 遇到下一个diff块
+					}
+
+					if strings.HasPrefix(diffLine, "+") && !strings.HasPrefix(diffLine, "+++") {
+						// 新增行
+						content := strings.TrimPrefix(diffLine, "+")
+						lineNum := startLine + len(changedLines)
+						changedLines = append(changedLines, ChangedLine{
+							LineNumber: lineNum,
+							Content:    content,
+							Type:       "added",
+						})
+					} else if strings.HasPrefix(diffLine, "-") && !strings.HasPrefix(diffLine, "---") {
+						// 删除行（记录但不计入行号）
+						content := strings.TrimPrefix(diffLine, "-")
+						changedLines = append(changedLines, ChangedLine{
+							LineNumber: startLine,
+							Content:    content,
+							Type:       "deleted",
+						})
+					} else if strings.HasPrefix(diffLine, " ") {
+						// 上下文行，跳过但调整行号计数
+						startLine++
+					}
+				}
+			}
+		}
+	}
+
+	// 如果diff解析失败，回退到简单的行号范围检测
+	if len(changedLines) == 0 {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "@@") {
+				re := regexp.MustCompile(`@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
+				matches := re.FindStringSubmatch(line)
+				if len(matches) >= 2 {
+					startLine, _ := strconv.Atoi(matches[1])
+					count := 1
+					if len(matches) > 2 && matches[2] != "" {
+						count, _ = strconv.Atoi(matches[2])
+					}
+
+					// 从文件中读取实际内容
+					for i := 0; i < count; i++ {
+						lineNum := startLine + i
+						content := ""
+						if lineNum > 0 && lineNum <= len(fileLines) {
+							content = fileLines[lineNum-1]
+						}
+						changedLines = append(changedLines, ChangedLine{
+							LineNumber: lineNum,
+							Content:    content,
+							Type:       "modified",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	log.Printf("文件 %s 检测到 %d 个变更行", filePath, len(changedLines))
+	return changedLines, nil
+}
+
+// buildEnhancedContext 构建增强的代码上下文
+func buildEnhancedContext(filePath, baseCommit, strategy string) (*EnhancedContext, error) {
+	// 读取文件内容
+	fileContent, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %v", err)
+	}
+
+	// 提取变更行
+	changedLines, err := extractChangedLines(filePath, baseCommit)
+	if err != nil {
+		return nil, fmt.Errorf("提取变更行失败: %v", err)
+	}
+
+	// 提取行号列表
+	lineNumbers := make([]int, len(changedLines))
+	for i, change := range changedLines {
+		lineNumbers[i] = change.LineNumber
+	}
+
+	// 检测资源作用域
+	scopes, err := detectResourceScopes(string(fileContent), lineNumbers)
+	if err != nil {
+		return nil, fmt.Errorf("检测资源作用域失败: %v", err)
+	}
+
+	// 构建上下文
+	context := &EnhancedContext{
+		ChangedLines:   changedLines,
+		ResourceScopes: scopes,
+		ProjectPath:    filepath.Dir(filePath),
+		BaseCommit:     baseCommit,
+		Strategy:       strategy,
+	}
+
+	// 为在资源作用域内的变更构建上下文块
+	for _, scope := range scopes {
+		if scope.HasChanges {
+			scopeCode := extractLines(string(fileContent), scope.StartLine, scope.EndLine)
+			context.ContextBlocks = append(context.ContextBlocks, ContextBlock{
+				Type:      scope.Type,
+				StartLine: scope.StartLine,
+				EndLine:   scope.EndLine,
+				Code:      scopeCode,
+				Reason:    fmt.Sprintf("变更代码位于%s作用域内", scope.Type),
+			})
+		}
+	}
+
+	log.Printf("构建增强上下文完成: %d个变更行, %d个资源作用域, %d个上下文块",
+		len(context.ChangedLines), len(context.ResourceScopes), len(context.ContextBlocks))
+
+	return context, nil
+}
+
+// extractLines 提取指定行范围的代码
+func extractLines(content string, startLine, endLine int) string {
+	lines := strings.Split(content, "\n")
+	if startLine < 1 || endLine > len(lines) || startLine > endLine {
+		return ""
+	}
+
+	var result []string
+	for i := startLine - 1; i < endLine; i++ {
+		result = append(result, fmt.Sprintf("%d: %s", i+1, lines[i]))
+	}
+	return strings.Join(result, "\n")
+}
+
+// ==================== 智能上下文分析 ====================
+
+// assessRiskLevel 评估风险等级
+func assessRiskLevel(scopes []ResourceScope, changedLines []ChangedLine) string {
+	highRiskCount := 0
+	mediumRiskCount := 0
+	lowRiskCount := 0
+
+	// 基于资源作用域评估
+	for _, scope := range scopes {
+		if scope.HasChanges {
+			switch scope.Type {
+			case "transaction", "mutex", "waitgroup":
+				highRiskCount++
+			case "sql_rows", "grpc_conn", "redis_conn":
+				highRiskCount++
+			case "file", "http_response", "channel":
+				mediumRiskCount++
+			case "context", "ticker", "zip_reader":
+				mediumRiskCount++
+			case "temp_dir", "buffer_pool":
+				lowRiskCount++
+			}
+		}
+	}
+
+	// 基于变更行数量和内容评估
+	if len(changedLines) > 50 {
+		mediumRiskCount++ // 大量变更增加风险
+	}
+
+	// 检查变更内容中的高风险关键词
+	for _, line := range changedLines {
+		content := strings.ToLower(line.Content)
+		// 高风险：panic、数组越界、空指针、并发问题
+		if strings.Contains(content, "panic") ||
+			strings.Contains(content, "unsafe") ||
+			strings.Contains(content, "goroutine") ||
+			strings.Contains(content, "go func") ||
+			strings.Contains(content, "[") && strings.Contains(content, "]") || // 数组/切片访问
+			strings.Contains(content, "*") && strings.Contains(content, ".") || // 指针解引用
+			strings.Contains(content, ".(") || // 类型断言
+			strings.Contains(content, "must") || // MustXxx函数
+			strings.Contains(content, "fatal") {
+			highRiskCount++
+		} else if strings.Contains(content, "defer") ||
+			strings.Contains(content, "close") ||
+			strings.Contains(content, "commit") ||
+			strings.Contains(content, "rollback") ||
+			strings.Contains(content, "recover") || // panic恢复
+			strings.Contains(content, "len(") || // 长度检查
+			strings.Contains(content, "cap(") || // 容量检查
+			strings.Contains(content, "nil") { // nil检查
+			mediumRiskCount++
+		}
+	}
+
+	if highRiskCount > 0 {
+		return "high"
+	}
+	if mediumRiskCount > 0 {
+		return "medium"
+	}
+	if lowRiskCount > 0 || len(changedLines) > 10 {
+		return "low"
+	}
+	return "none"
+}
+
+// identifyFocusAreas 识别需要重点关注的领域
+func identifyFocusAreas(scopes []ResourceScope) []string {
+	focusMap := make(map[string]bool)
+
+	for _, scope := range scopes {
+		if scope.HasChanges {
+			switch scope.Type {
+			case "transaction":
+				focusMap["transaction"] = true
+			case "mutex", "waitgroup":
+				focusMap["concurrency"] = true
+			case "file", "http_response", "grpc_conn", "redis_conn", "channel", "zip_reader", "temp_dir", "buffer_pool":
+				focusMap["resource"] = true
+			case "context", "ticker":
+				focusMap["concurrency"] = true
+			case "panic_recovery", "slice_bounds", "type_assertion", "nil_pointer":
+				focusMap["panic_safety"] = true
+			case "sql_rows":
+				focusMap["transaction"] = true
+				focusMap["resource"] = true
+			}
+		}
+	}
+
+	var areas []string
+	for area := range focusMap {
+		areas = append(areas, area)
+	}
+
+	return areas
+}
+
+// generateSimplifiedPrompt 生成精简的AI提示词模板（已废弃）
+func generateSimplifiedPrompt(files []FileAnalysis, scopes []ResourceScope, focusAreas []string) string {
+	return "代码审查工具已重构，不再生成提示词"
+}
+
+// 已删除不再需要的函数
+
+// detectRiskPoints 检测代码风险点
+func detectRiskPoints(filePath string, changedLines []ChangedLine, scopes []ResourceScope) []RiskPoint {
+	var riskPoints []RiskPoint
+	riskID := 1
+
+	// 1. 基于变更行内容检测风险
+	for _, line := range changedLines {
+		content := strings.TrimSpace(line.Content)
+		if content == "" {
+			continue
+		}
+
+		contentLower := strings.ToLower(content)
+
+		// 检测各种风险模式
+		risks := []struct {
+			pattern     string
+			riskType    string
+			category    string
+			severity    string
+			description string
+			suggestion  string
+		}{
+			// Panic 风险
+			{"panic(", "panic_call", "panic_safety", "high", "直接调用panic可能导致程序崩溃", "使用错误返回值替代panic，或添加recover机制"},
+			{"must", "panic_risk", "panic_safety", "medium", "MustXxx函数可能触发panic", "检查函数文档，添加错误处理"},
+			{"[", "bounds_risk", "panic_safety", "medium", "数组/切片访问可能越界", "添加边界检查: if index < len(arr)"},
+			{".(", "type_assertion", "panic_safety", "medium", "类型断言失败可能panic", "使用安全的类型断言: val, ok := x.(Type)"},
+
+			// 事务风险
+			{"begin(", "transaction_start", "transaction", "high", "事务开启，需确保正确关闭", "添加defer tx.Rollback()或在成功时调用tx.Commit()"},
+			{"commit(", "transaction_commit", "transaction", "medium", "事务提交，需确保错误处理", "检查commit返回的错误"},
+			{"rollback(", "transaction_rollback", "transaction", "low", "事务回滚操作", "确保在适当的错误路径中调用"},
+
+			// 资源风险
+			{"open(", "resource_open", "resource", "medium", "资源打开，需确保关闭", "添加defer file.Close()"},
+			{"close()", "resource_close", "resource", "low", "资源关闭操作", "确保资源正确关闭"},
+
+			// 并发风险
+			{"go func", "goroutine_start", "concurrency", "medium", "启动goroutine，注意资源管理", "确保goroutine能正常退出，避免泄漏"},
+			{"lock()", "mutex_lock", "concurrency", "medium", "获取锁，需确保释放", "添加defer mu.Unlock()"},
+			{"unlock()", "mutex_unlock", "concurrency", "low", "释放锁操作", "确保锁的获取和释放匹配"},
+		}
+
+		for _, risk := range risks {
+			if strings.Contains(contentLower, risk.pattern) {
+				riskPoint := RiskPoint{
+					ID:          fmt.Sprintf("%s_%d_%d", risk.riskType, line.LineNumber, riskID),
+					Type:        risk.riskType,
+					Category:    risk.category,
+					Line:        line.LineNumber,
+					Severity:    risk.severity,
+					Description: risk.description,
+					Context:     content,
+					Suggestion:  risk.suggestion,
+				}
+				riskPoints = append(riskPoints, riskPoint)
+				riskID++
+			}
+		}
+	}
+
+	// 2. 基于资源作用域检测风险
+	for _, scope := range scopes {
+		if scope.HasChanges {
+			var riskType, description, suggestion string
+			severity := "medium"
+
+			switch scope.Type {
+			case "transaction":
+				riskType = "transaction_scope_change"
+				description = "事务作用域内有代码变更，需检查事务完整性"
+				suggestion = "确保变更不会影响事务的正确提交或回滚"
+			case "mutex":
+				riskType = "mutex_scope_change"
+				description = "锁作用域内有代码变更，需检查并发安全"
+				suggestion = "确保变更不会引入竞态条件或死锁"
+				severity = "high"
+			case "panic_recovery":
+				riskType = "panic_recovery_change"
+				description = "panic恢复机制内有变更，需检查错误处理"
+				suggestion = "确保panic能被正确捕获和处理"
+				severity = "high"
+			default:
+				riskType = "resource_scope_change"
+				description = fmt.Sprintf("%s资源作用域内有变更", scope.Type)
+				suggestion = "检查资源的正确获取和释放"
+			}
+
+			riskPoint := RiskPoint{
+				ID:          fmt.Sprintf("%s_%s_%d", riskType, scope.ID, riskID),
+				Type:        riskType,
+				Category:    getCategoryByType(scope.Type),
+				Line:        scope.StartLine,
+				Severity:    severity,
+				Description: description,
+				Context:     fmt.Sprintf("%s作用域 (第%d-%d行)", scope.Type, scope.StartLine, scope.EndLine),
+				Suggestion:  suggestion,
+			}
+			riskPoints = append(riskPoints, riskPoint)
+			riskID++
+		}
+	}
+
+	return riskPoints
+}
+
+// getCategoryByType 根据类型获取分类
+func getCategoryByType(scopeType string) string {
+	switch scopeType {
+	case "transaction", "sql_rows":
+		return "transaction"
+	case "mutex", "waitgroup", "context", "ticker":
+		return "concurrency"
+	case "panic_recovery", "slice_bounds", "type_assertion", "nil_pointer":
+		return "panic_safety"
+	default:
+		return "resource"
+	}
+}
+
+// assessFileRiskLevel 评估单个文件的风险等级
+func assessFileRiskLevel(riskPoints []RiskPoint) string {
+	if len(riskPoints) == 0 {
+		return "none"
+	}
+
+	highCount := 0
+	mediumCount := 0
+
+	for _, risk := range riskPoints {
+		switch risk.Severity {
+		case "high":
+			highCount++
+		case "medium":
+			mediumCount++
+		}
+	}
+
+	if highCount > 0 {
+		return "high"
+	}
+	if mediumCount > 0 {
+		return "medium"
+	}
+	return "low"
+}
+
+// 已删除 generateAIInstructions 函数（不再需要）
+
+// ==================== 主处理函数 ====================
+
+// handleCodeReview 处理代码审查请求（重构版 - 专注风险检测）
+func handleCodeReview(request *CodeReviewRequest) (*mcp.CallToolResult, error) {
+	startTime := time.Now()
+
+	log.Printf("开始代码审查分析，项目路径: %s", request.ProjectPath)
+
+	// 1. 获取变更的Go文件
+	changedFiles, baseCommit, _, err := getChangedGoFiles(request.ProjectPath)
+	if err != nil {
+		return nil, fmt.Errorf("获取变更文件失败: %v", err)
+	}
+
+	if len(changedFiles) == 0 {
+		log.Printf("未检测到Go文件变更")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{
+				Type: "text",
+				Text: `{"summary":{"totalChangedFiles":0,"totalRiskPoints":0,"riskLevel":"none"},"changedFiles":[],"processingTime":"0ms"}`,
+			}},
+		}, nil
+	}
+
+	// 2. 分析每个变更文件，检测风险点
+	var allFileAnalyses []FileAnalysis
+	totalRiskPoints := 0
+
+	for _, filePath := range changedFiles {
+		log.Printf("分析文件: %s", filePath)
+
+		// 获取变更行
+		changedLines, err := extractChangedLines(filePath, baseCommit)
+		if err != nil {
+			log.Printf("提取文件 %s 的变更行失败: %v", filePath, err)
+			continue
+		}
+
+		// 如果没有变更行，跳过
+		if len(changedLines) == 0 {
+			log.Printf("文件 %s 无变更行", filePath)
+			continue
+		}
+
+		// 检测资源作用域
+		fileContent, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			log.Printf("读取文件 %s 失败: %v", filePath, err)
+			continue
+		}
+
+		changedLineNumbers := make([]int, len(changedLines))
+		for i, line := range changedLines {
+			changedLineNumbers[i] = line.LineNumber
+		}
+
+		scopes, err := detectResourceScopes(string(fileContent), changedLineNumbers)
+		if err != nil {
+			log.Printf("检测文件 %s 的资源作用域失败: %v", filePath, err)
+			scopes = []ResourceScope{} // 继续处理，但不包含作用域
+		}
+
+		// 检测风险点
+		riskPoints := detectRiskPoints(filePath, changedLines, scopes)
+
+		// 评估文件风险等级
+		riskLevel := assessFileRiskLevel(riskPoints)
+
+		// 创建文件分析结果
+		fileAnalysis := FileAnalysis{
+			File:         filePath,
+			ChangedLines: changedLines,
+			RiskPoints:   riskPoints,
+			RiskLevel:    riskLevel,
+		}
+
+		allFileAnalyses = append(allFileAnalyses, fileAnalysis)
+		totalRiskPoints += len(riskPoints)
+
+		log.Printf("文件 %s 分析完成，发现 %d 个风险点", filePath, len(riskPoints))
+	}
+
+	// 3. 创建概览摘要（专注风险统计）
+	riskByCategory := make(map[string]int)
+	riskBySeverity := make(map[string]int)
+	overallRiskLevel := "none"
+
+	// 统计风险点
+	for _, file := range allFileAnalyses {
+		for _, risk := range file.RiskPoints {
+			riskByCategory[risk.Category]++
+			riskBySeverity[risk.Severity]++
+		}
+		
+		// 更新整体风险等级
+		if file.RiskLevel == "high" {
+			overallRiskLevel = "high"
+		} else if file.RiskLevel == "medium" && overallRiskLevel != "high" {
+			overallRiskLevel = "medium"
+		} else if file.RiskLevel == "low" && overallRiskLevel == "none" {
+			overallRiskLevel = "low"
+		}
+	}
+
+	summary := ReviewSummary{
+		TotalChangedFiles: len(allFileAnalyses),
+		TotalRiskPoints:   totalRiskPoints,
+		RiskLevel:         overallRiskLevel,
+		RiskByCategory:    riskByCategory,
+		RiskBySeverity:    riskBySeverity,
+		ProcessingTime:    time.Since(startTime).String(),
+	}
+
+	// 4. 构建最终结果（精简版）
+	result := CodeReviewOutput{
+		Summary:        summary,
+		ChangedFiles:   allFileAnalyses,
+		ProcessingTime: time.Since(startTime).String(),
+	}
+
+	log.Printf("代码审查分析完成，处理 %d 个文件，发现 %d 个风险点，处理时间: %s",
+		len(allFileAnalyses), totalRiskPoints, result.ProcessingTime)
+
+	// 5. 返回结果
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("序列化结果失败: %v", err)
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Type: "text", Text: string(resultJSON)}},
+	}, nil
+}
+
 func main() {
 	// 设置日志输出到文件
 	logFile, err := os.OpenFile("/tmp/lint-mcp-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -960,6 +1937,37 @@ func main() {
 
 	log.Println("工具注册成功: code_lint")
 
+	// 注册 code_review 工具
+	reviewTool := mcp.NewTool("code_review",
+		mcp.WithDescription("智能代码上下文分析工具。基于变更检测，识别资源作用域，为外部AI工具提供精准的代码上下文和结构化分析数据。专注于并发、事务、资源管理等关键领域。"),
+		mcp.WithString("projectPath",
+			mcp.Description("项目根目录（可选，优先作为检测起点，建议为Git仓库或包含go.mod的目录）"),
+		),
+		mcp.WithArray("reviewFocus",
+			mcp.Description("关注点列表，可选值：concurrency(并发安全)、transaction(事务管理)、resource(资源管理)、performance(性能问题)。默认全部"),
+		),
+	)
+
+	s.AddTool(reviewTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var request CodeReviewRequest
+
+		// 手动解析参数
+		if projectPath, ok := req.Params.Arguments["projectPath"].(string); ok {
+			request.ProjectPath = projectPath
+		}
+		if reviewFocus, ok := req.Params.Arguments["reviewFocus"].([]interface{}); ok {
+			for _, rf := range reviewFocus {
+				if rfStr, ok := rf.(string); ok {
+					request.ReviewFocus = append(request.ReviewFocus, rfStr)
+				}
+			}
+		}
+
+		return handleCodeReview(&request)
+	})
+
+	log.Println("工具注册成功: code_review")
+
 	// 启动时检查golangci-lint版本兼容性
 	if err := checkGolangciLintInstalled(); err != nil {
 		log.Printf("❌ golangci-lint 版本检查失败: %v", err)
@@ -974,3 +1982,4 @@ func main() {
 		log.Printf("服务错误: %v\n", err)
 	}
 }
+
