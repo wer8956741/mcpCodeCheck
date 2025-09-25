@@ -7,7 +7,7 @@
 ### 系统要求
 
 - **Go 1.20+** (运行时环境)
-- **golangci-lint v2.4.0+** (必须安装且在 PATH 中可用，推荐 v2.4.0)
+- **golangci-lint v1.52.2+** (必须安装且在 PATH 中可用，推荐 v2.4.0，兼容 v1.52.2+)
 - **Node.js 14.0+** (用于 npm 包管理)
 - **Git** (用于智能变更检测)
 
@@ -179,27 +179,30 @@ npm view lint-mcp
 ## 📝 使用说明
 
 ### 安装要求
-1. 安装 golangci-lint v2.4.0（推荐）：
+1. 安装 golangci-lint（根据您的 Go 版本选择）：
    ```bash
    # 方法1 - 使用 Homebrew（macOS，推荐）
    brew install golangci-lint
    # 确认版本
    golangci-lint version
 
-   # 方法2 - 使用 Go install
+   # 方法2 - 使用 Go install（推荐给 Go 1.20 用户）
+   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
+
+   # 方法3 - 使用 Go install（推荐给 Go 1.21+ 用户）
    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0
 
-   # 方法3 - 使用安装脚本
-   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
+   # 方法4 - 使用安装脚本
+   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.52.2
    ```
 
 2. 确保 golangci-lint 在 PATH 中且版本兼容：
    ```bash
    golangci-lint version
-   # 应显示 golangci-lint has version 2.4.0 或更高版本
+   # 应显示 golangci-lint has version 1.52.2 或更高版本
    ```
 
-**重要提示**：本工具需要 golangci-lint v2.4.0+ 或 v1.52.2+。如果您的系统中有多个版本，请确保 PATH 中的版本是兼容的。可以通过 `which golangci-lint` 检查当前使用的版本路径。
+**重要提示**：本工具需要 golangci-lint v1.52.2+ 或更高版本（推荐 v2.4.0+）。如果您的系统中有多个版本，请确保 PATH 中的版本是兼容的。可以通过 `which golangci-lint` 检查当前使用的版本路径。
 
 ### API 说明
 
@@ -454,7 +457,7 @@ npm view lint-mcp
 
 ### 运行时要求
 - **Go 1.20+** (基于 go.mod 中的版本要求)
-- **golangci-lint v2.4.0+** (推荐 v2.4.0，需要在 PATH 中可用)
+- **golangci-lint v1.52.2+** (推荐 v2.4.0，需要在 PATH 中可用)
 - **Git** (用于智能变更检测)
 
 ### 开发依赖

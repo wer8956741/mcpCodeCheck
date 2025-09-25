@@ -353,17 +353,24 @@ func checkGolangciLintVersion(golangciLintPath string) error {
 
 	helpStr := string(helpOutput)
 
-	// 检查是否支持JSON输出（v2.4.0+支持--output.json.path）
-	supportsOutputJson := strings.Contains(helpStr, "--output.json.path")
+	// 检查是否支持JSON输出
+	// v2.4.0+支持--output.json.path（新版本格式）
+	supportsNewJsonOutput := strings.Contains(helpStr, "--output.json.path")
+	// v1.52.2+支持--out-format json（旧版本格式）
+	supportsOldJsonOutput := strings.Contains(helpStr, "--out-format")
 
-	if !supportsOutputJson {
+	if !supportsNewJsonOutput && !supportsOldJsonOutput {
 		return fmt.Errorf(`golangci-lint 版本不兼容
 
 当前版本: %s
-要求版本: v2.4.0 或更高版本
+要求版本: v1.52.2 或更高版本
 
 请升级到兼容版本：
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.4.0
+# 推荐版本（适合Go 1.20+）
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
+
+# 或最新版本（适合Go 1.21+）
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 升级后请重启MCP服务。`, strings.TrimSpace(versionOutput))
 	}
