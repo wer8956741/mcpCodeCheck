@@ -1,6 +1,6 @@
 {
   "name": "go-guard",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "GoGuard - Intelligent Go code quality assurance MCP server with smart change detection and risk analysis",
   "main": "index.js",
   "bin": {
