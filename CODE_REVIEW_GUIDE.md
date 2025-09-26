@@ -167,12 +167,12 @@ Cursor: 调用 code_review 工具 → 获得完整事务上下文 → 精准 AI 
 
 ### **1. 编译工具**
 ```bash
-go build -o bin/lint-mcp-review main.go
+go build -o bin/go-guard-review main.go
 ```
 
 ### **2. 启动 MCP 服务**
 ```bash
-./bin/lint-mcp-review
+./bin/go-guard-review
 ```
 
 ### **3. 在 Cursor 中配置**
@@ -180,7 +180,7 @@ go build -o bin/lint-mcp-review main.go
 {
   "mcpServers": {
     "code-review": {
-      "command": "/path/to/lint-mcp-review"
+      "command": "/path/to/go-guard-review"
     }
   }
 }
@@ -198,7 +198,7 @@ go build -o bin/lint-mcp-review main.go
 ```bash
 # Git Hook 示例
 #!/bin/sh
-./bin/lint-mcp-review | jq '.summary.riskLevel' | grep -q "high" && exit 1
+./bin/go-guard-review | jq '.summary.riskLevel' | grep -q "high" && exit 1
 ```
 
 ### **2. 重点关注高风险场景**

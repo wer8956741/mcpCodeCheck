@@ -1,15 +1,15 @@
 {
-  "name": "lint-mcp",
+  "name": "go-guard",
   "version": "3.0.4",
-  "description": "Intelligent Go code linting MCP server with smart change detection and multi-project support",
+  "description": "GoGuard - Intelligent Go code quality assurance MCP server with smart change detection and risk analysis",
   "main": "index.js",
   "bin": {
-    "lint-mcp": "./index.js"
+    "go-guard": "./index.js"
   },
   "scripts": {
-    "build": "go build -o bin/lint-mcp main.go",
+    "build": "go build -o bin/go-guard main.go",
     "prepublishOnly": "npm run build",
-    "postinstall": "echo 'lint-mcp installed successfully! Use: npx lint-mcp'",
+    "postinstall": "echo 'go-guard installed successfully! Use: npx go-guard'",
     "publish-package": "./scripts/publish.sh",
     "update": "./scripts/update.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -25,15 +25,15 @@
     "cursor",
     "ai-tools"
   ],
-  "author": "lint-mcp contributors",
+  "author": "go-guard contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/lint-mcp.git"
+    "url": "https://github.com/yourusername/go-guard.git"
   },
-  "homepage": "https://github.com/yourusername/lint-mcp#readme",
+  "homepage": "https://github.com/yourusername/go-guard#readme",
   "bugs": {
-    "url": "https://github.com/yourusername/lint-mcp/issues"
+    "url": "https://github.com/yourusername/go-guard/issues"
   },
   "engines": {
     "node": ">=14.0.0"

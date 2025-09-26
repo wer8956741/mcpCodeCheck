@@ -9,7 +9,7 @@ function getBinaryPath() {
   const platform = os.platform();
   const arch = os.arch();
   
-  let binaryName = 'lint-mcp';
+  let binaryName = 'go-guard';
   if (platform === 'win32') {
     binaryName += '.exe';
   }
@@ -38,17 +38,17 @@ function startMCPServer() {
   // 处理进程退出
   child.on('exit', (code, signal) => {
     if (signal) {
-      console.error(`lint-mcp was killed with signal ${signal}`);
+      console.error(`go-guard was killed with signal ${signal}`);
       process.exit(1);
     } else if (code !== 0) {
-      console.error(`lint-mcp exited with code ${code}`);
+      console.error(`go-guard exited with code ${code}`);
       process.exit(code);
     }
   });
   
   // 处理错误
   child.on('error', (err) => {
-    console.error(`Failed to start lint-mcp: ${err.message}`);
+    console.error(`Failed to start go-guard: ${err.message}`);
     process.exit(1);
   });
   

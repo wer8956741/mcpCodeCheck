@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🚀 准备发布 lint-mcp 到 npm..."
+echo "🚀 准备发布 go-guard 到 npm..."
 
 # 检查是否已登录 npm
 if ! npm whoami > /dev/null 2>&1; then
@@ -17,8 +17,8 @@ echo "🔨 构建二进制文件..."
 npm run build
 
 # 检查二进制文件是否存在
-if [ ! -f "bin/lint-mcp" ]; then
-    echo "❌ 二进制文件 bin/lint-mcp 不存在"
+if [ ! -f "bin/go-guard" ]; then
+    echo "❌ 二进制文件 bin/go-guard 不存在"
     exit 1
 fi
 
@@ -42,5 +42,5 @@ npm publish
 
 echo "✅ 发布成功!"
 echo "📝 可以通过以下方式使用:"
-echo "   npx lint-mcp"
-echo "   npm install -g lint-mcp"
+echo "   npx go-guard"
+echo "   npm install -g go-guard"

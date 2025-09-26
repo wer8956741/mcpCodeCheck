@@ -2,7 +2,7 @@
 
 ## 语义化版本控制 (SemVer)
 
-lint-mcp 遵循 [语义化版本控制](https://semver.org/lang/zh-CN/) 规范：
+go-guard 遵循 [语义化版本控制](https://semver.org/lang/zh-CN/) 规范：
 
 ### 版本格式：`主版本号.次版本号.修订号`
 
@@ -98,13 +98,13 @@ npm publish
 
 ```bash
 # npx 自动使用最新版本
-npx lint-mcp@latest
+npx go-guard@latest
 
 # 更新全局安装
-npm update -g lint-mcp
+npm update -g go-guard
 
 # 检查版本
-npm view lint-mcp version
+npm view go-guard version
 ```
 
 ## 🔍 版本发布检查清单

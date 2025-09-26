@@ -1,6 +1,6 @@
-# MCP 代码检查服务 (lint-mcp)
+# GoGuard MCP 代码检查服务 (go-guard)
 
-一个智能的 Go 代码质量保障服务，通过 MCP (Model Context Protocol) 协议提供双重检查能力：传统的代码质量检查（基于 golangci-lint）和智能的运行时风险检测。专注于开发过程中的全面代码质量保障，自动检测分支开发范围，避免历史代码问题干扰，并提供结构化的风险数据用于 AI 辅助代码审查。
+GoGuard 是一个智能的 Go 代码质量保障服务，通过 MCP (Model Context Protocol) 协议提供双重检查能力：传统的代码质量检查（基于 golangci-lint）和智能的运行时风险检测。专注于开发过程中的全面代码质量保障，自动检测分支开发范围，避免历史代码问题干扰，并提供结构化的风险数据用于 AI 辅助代码审查。
 
 ## 📦 安装
 
@@ -15,51 +15,51 @@
 
 ```bash
 # 直接使用 npx（无需安装，自动使用最新版本）
-npx lint-mcp
+npx go-guard
 
 # 或全局安装
-npm install -g lint-mcp
+npm install -g go-guard
 
 # 或本地安装
-npm install lint-mcp
+npm install go-guard
 ```
 
 ### 从源码编译
 
 ```bash
 git clone <repository-url>
-cd lint-mcp
+cd go-guard
 # 安装依赖并构建
 npm run build
 # 或直接使用 Go 编译
-go build -o bin/lint-mcp main.go
+go build -o bin/go-guard main.go
 ```
 
 ### 验证安装
 
 ```bash
-# 检查 lint-mcp 是否正常工作
-npx lint-mcp --help 2>/dev/null || echo "lint-mcp 运行正常"
+# 检查 go-guard 是否正常工作
+npx go-guard --help 2>/dev/null || echo "go-guard 运行正常"
 
 # 检查依赖是否满足
 golangci-lint --version
 go version
 
 # 检查已安装版本
-npm view lint-mcp version
+npm view go-guard version
 ```
 
 ### 更新到最新版本
 
 ```bash
 # npx 自动使用最新版本（推荐）
-npx lint-mcp@latest
+npx go-guard@latest
 
 # 更新全局安装
-npm update -g lint-mcp
+npm update -g go-guard
 
 # 检查最新版本和更新日志
-npm view lint-mcp
+npm view go-guard
 ```
 
 ## 🔧 MCP 客户端配置
@@ -71,11 +71,11 @@ npm view lint-mcp
 ```json
 {
   "mcpServers": {
-    "lint-mcp": {
+    "go-guard": {
       "command": "npx",
       "args": [
         "-y",
-        "lint-mcp@latest"
+        "go-guard@latest"
       ]
     }
   }
@@ -87,8 +87,8 @@ npm view lint-mcp
 ```json
 {
   "mcpServers": {
-    "lint-mcp": {
-      "command": "lint-mcp",
+    "go-guard": {
+      "command": "go-guard",
       "args": []
     }
   }
@@ -101,9 +101,9 @@ npm view lint-mcp
 
 ```json
 {
-  "name": "lint-mcp",
+  "name": "go-guard",
   "command": "npx",
-  "args": ["lint-mcp"],
+  "args": ["go-guard"],
   "transport": "stdio"
 }
 ```

@@ -9,7 +9,7 @@ ls -la
 # 应该包含：
 # - package.json
 # - index.js
-# - bin/lint-mcp (编译后的二进制文件)
+# - bin/go-guard (编译后的二进制文件)
 # - README.md
 # - LICENSE
 # - .npmignore
@@ -36,7 +36,7 @@ npm pack --dry-run
 
 # 或创建实际的 tarball 检查
 npm pack
-tar -tzf lint-mcp-1.0.0.tgz
+tar -tzf go-guard-1.0.0.tgz
 ```
 
 ## 发布步骤
@@ -53,17 +53,17 @@ npm login
 npm publish
 
 # 如果包名被占用，可以使用 scoped 包名
-# 修改 package.json 中的 name 为 "@yourusername/lint-mcp"
+# 修改 package.json 中的 name 为 "@yourusername/go-guard"
 # npm publish --access public
 ```
 
 ### 3. 验证发布
 ```bash
 # 检查包是否发布成功
-npm view lint-mcp
+npm view go-guard
 
 # 测试从 npm 安装
-npx lint-mcp@latest --version
+npx go-guard@latest --version
 ```
 
 ## 更新版本
@@ -87,9 +87,9 @@ npm publish
 
 ## 注意事项
 
-1. **包名唯一性**: 确保 `lint-mcp` 这个包名在 npm 上可用
+1. **包名唯一性**: 确保 `go-guard` 这个包名在 npm 上可用
 2. **版本管理**: 每次发布都需要更新版本号
-3. **二进制文件**: 确保 `bin/lint-mcp` 是编译好的可执行文件
+3. **二进制文件**: 确保 `bin/go-guard` 是编译好的可执行文件
 4. **跨平台**: 当前只包含当前平台的二进制文件，如需支持多平台需要额外配置
 5. **依赖**: 确保用户系统有 `golangci-lint` 可用
 

@@ -11,8 +11,8 @@
 ### 2. 测试更改
 ```bash
 # 本地测试编译
-go build -o test-lint-mcp main.go
-./test-lint-mcp
+go build -o test-go-guard main.go
+./test-go-guard
 
 # 或使用 npm 脚本测试
 npm run build

@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🔄 lint-mcp 更新和发布脚本"
+echo "🔄 go-guard 更新和发布脚本"
 
 # 检查是否有未提交的更改
 if [ -n "$(git status --porcelain)" ]; then
@@ -61,7 +61,7 @@ echo "📦 当前版本: $CURRENT_VERSION"
 echo "🔨 测试构建..."
 npm run build
 
-if [ ! -f "bin/lint-mcp" ]; then
+if [ ! -f "bin/go-guard" ]; then
     echo "❌ 构建失败：二进制文件不存在"
     exit 1
 fi
@@ -99,8 +99,8 @@ echo ""
 echo "✅ 发布成功!"
 echo "📝 版本: $CURRENT_VERSION"
 echo "🔗 用户可以通过以下方式更新:"
-echo "   npx lint-mcp@latest"
-echo "   npm update -g lint-mcp"
+echo "   npx go-guard@latest"
+echo "   npm update -g go-guard"
 
 # 可选：推送 git 标签
 if [ -n "$(git status --porcelain)" ] || [ -n "$(git log --oneline origin/main..HEAD 2>/dev/null)" ]; then

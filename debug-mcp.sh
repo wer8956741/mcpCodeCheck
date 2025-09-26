@@ -3,8 +3,8 @@
 # MCP服务调试脚本
 # 使用方法：./debug-mcp.sh
 
-LOG_FILE="/tmp/lint-mcp-debug.log"
-BIN_PATH="$(dirname "$0")/bin/lint-mcp-debug"
+LOG_FILE="/tmp/go-guard-debug.log"
+BIN_PATH="$(dirname "$0")/bin/go-guard-debug"
 
 echo "🔍 启动MCP服务调试模式..."
 echo "📝 日志文件: $LOG_FILE"

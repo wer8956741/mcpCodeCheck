@@ -3,13 +3,13 @@
 ## ✅ 发布前必须完成的步骤
 
 ### 1. 包信息检查
-- [ ] 确认 `package.json` 中的包名 `lint-mcp` 在 npm 上可用
+- [ ] 确认 `package.json` 中的包名 `go-guard` 在 npm 上可用
 - [ ] 更新 `author` 字段为你的信息
 - [ ] 更新 `repository` URL 为你的 GitHub 仓库
 - [ ] 确认版本号正确
 
 ### 2. 文件检查
-- [ ] `bin/lint-mcp` 二进制文件存在且可执行
+- [ ] `bin/go-guard` 二进制文件存在且可执行
 - [ ] `index.js` 有执行权限 (`chmod +x index.js`)
 - [ ] `README.md` 内容完整
 - [ ] `LICENSE` 文件存在
@@ -44,10 +44,10 @@ npm publish
 
 ```bash
 # 检查包是否发布成功
-npm view lint-mcp
+npm view go-guard
 
 # 测试 npx 安装和运行
-npx lint-mcp@latest --version
+npx go-guard@latest --version
 ```
 
 ## 🔄 更新版本
@@ -69,18 +69,18 @@ npm version major && npm publish
 
 ```bash
 # 直接使用（推荐）
-npx lint-mcp
+npx go-guard
 
 # 全局安装后使用
-npm install -g lint-mcp
-lint-mcp
+npm install -g go-guard
+go-guard
 
 # 在 Cursor 中配置
 {
   "mcpServers": {
-    "lint-mcp": {
+    "go-guard": {
       "command": "npx",
-      "args": ["lint-mcp"]
+      "args": ["go-guard"]
     }
   }
 }
@@ -88,7 +88,7 @@ lint-mcp
 
 ## ⚠️ 注意事项
 
-1. **包名冲突**: 如果 `lint-mcp` 已被占用，考虑使用 scoped 包名 `@yourusername/lint-mcp`
+1. **包名冲突**: 如果 `go-guard` 已被占用，考虑使用 scoped 包名 `@yourusername/go-guard`
 2. **平台限制**: 当前只支持当前编译平台，用户需要在相同平台使用
 3. **依赖要求**: 用户系统需要安装 `golangci-lint`
 4. **版本管理**: 每次发布都需要更新版本号

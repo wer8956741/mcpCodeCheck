@@ -35,4 +35,4 @@ temp/
 
 # Keep only the compiled binary in bin/
 bin/*
-!bin/lint-mcp
+!bin/go-guard

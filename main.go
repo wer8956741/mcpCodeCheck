@@ -21,7 +21,7 @@ import (
 // buildErrorResult 统一将错误以 JSON Issues 形式返回，避免上层只显示 "Error:"
 func buildErrorResult(message string) *mcp.CallToolResult {
 	lr := &LintResult{Issues: []Issue{{
-		FromLinter: "lint-mcp",
+		FromLinter: "go-guard",
 		Text:       message,
 		Pos:        Pos{Filename: "system", Line: 0, Column: 0},
 	}}}
@@ -1912,7 +1912,7 @@ func handleCodeReview(request *CodeReviewRequest) (*mcp.CallToolResult, error) {
 
 func main() {
 	// 设置日志输出到文件
-	logFile, err := os.OpenFile("/tmp/lint-mcp-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("/tmp/go-guard-debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		// 如果无法创建日志文件，使用stderr
 		log.SetOutput(os.Stderr)
@@ -1923,12 +1923,12 @@ func main() {
 
 	// 设置日志输出格式，包含时间和文件位置
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("🚀 启动 lint-mcp 服务 (兼容版本)...")
-	log.Printf("📝 日志文件: /tmp/lint-mcp-debug.log")
+	log.Println("🚀 启动 go-guard 服务 (兼容版本)...")
+	log.Printf("📝 日志文件: /tmp/go-guard-debug.log")
 	log.Printf("🕐 启动时间: %s", time.Now().Format("2006-01-02 15:04:05"))
 
 	s := server.NewMCPServer(
-		"lint-mcp",
+		"go-guard",
 		"1.0.16",
 	)
 
